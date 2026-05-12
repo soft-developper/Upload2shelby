@@ -10,7 +10,7 @@ createRoot(document.getElementById("root")!).render(
       autoConnect={true}
       dappConfig={{ 
         network: Network.TESTNET,
-        aptosApiKey: import.meta.env.VITE_APTOS_API_KEY || ""
+        aptosApiKeys: import.meta.env.VITE_APTOS_API_KEY || ""
       }}
       disableTelemetry={true}
       onError={(error) => console.error("Wallet error:", error)}
