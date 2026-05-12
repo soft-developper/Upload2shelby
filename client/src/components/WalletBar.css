@@ -1,0 +1,115 @@
+.walletbar { display: flex; align-items: center; }
+
+.walletbar__connected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+}
+
+.walletbar__icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+
+.walletbar__address {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.walletbar__disconnect {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+/* Modal */
+.wallet-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.wallet-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
+  animation: slideIn 0.2s ease-out;
+}
+
+.wallet-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wallet-modal__header h3 {
+  font-family: var(--font-head);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.wallet-modal__close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.wallet-modal__close:hover { color: var(--text); }
+
+.wallet-modal__list {
+  list-style: none;
+  padding: 8px;
+}
+
+.wallet-modal__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.wallet-modal__item:hover { background: var(--surface-2); }
+
+.wallet-modal__wallet-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.wallet-modal__install {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
