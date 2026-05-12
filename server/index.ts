@@ -2,7 +2,7 @@ import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import cors from "cors";
-import { ShelbyNodeClient } from "@shelby-protocol/sdk/node";
+import { ShelbyNodeClient, Network } from "@shelby-protocol/sdk/node";
 import { Account, Ed25519PrivateKey } from "@aptos-labs/ts-sdk";
 import path from "path";
 
@@ -33,7 +33,7 @@ if (!PRIVATE_KEY) {
 //  ShelbyNetwork.MAINNET   = production
 //
 const shelbyClient = new ShelbyNodeClient({
-  network: "shelbynet",
+  network: Network.SHELBYNET,
 });
 
 // ─── Signer ──────────────────────────────────────────────────────────────────
