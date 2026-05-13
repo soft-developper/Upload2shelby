@@ -48,6 +48,7 @@ console.log("✅ Database connected");
 
 const shelbyClient = new ShelbyNodeClient({
   network: Network.SHELBYNET,
+  apiKey: process.env.APTOS_API_KEY,
 });
 
 const signer = Account.fromPrivateKey({
