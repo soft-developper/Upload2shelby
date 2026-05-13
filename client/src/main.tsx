@@ -7,7 +7,7 @@ import App from "./App.tsx";
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <AptosWalletAdapterProvider
-      autoConnect={true}
+      autoConnect={false}
       dappConfig={{ 
         network: Network.TESTNET,
         aptosApiKeys: import.meta.env.VITE_APTOS_API_KEY || ""
