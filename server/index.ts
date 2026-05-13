@@ -3,11 +3,11 @@ import express, { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import cors from "cors";
 import { ShelbyNodeClient } from "@shelby-protocol/sdk/node";
-//import { Account, Ed25519PrivateKey } from "@aptos-labs/ts-sdk";
 import { Account, Ed25519PrivateKey, Network } from "@aptos-labs/ts-sdk";
+import { createClient } from "@libsql/client";
 import path from "path";
 
-// ─── App Setup ──────────────────────────────────────────────────────────────
+// ─── App Setup ───────────────────────────────────────────────────────────────
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -15,69 +15,67 @@ const PORT = process.env.PORT || 4000;
 app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173" }));
 app.use(express.json());
 
-// ─── Validate required env vars ─────────────────────────────────────────────
+// ─── Validate env vars ───────────────────────────────────────────────────────
 
 const PRIVATE_KEY = process.env.SHELBY_PRIVATE_KEY;
-
 if (!PRIVATE_KEY) {
-  console.error("❌  SHELBY_PRIVATE_KEY is missing from server/.env");
-  console.error("    Run: shelby account show  — then copy the private key.");
+  console.error("❌  SHELBY_PRIVATE_KEY is missing from .env");
   process.exit(1);
 }
 
+// ─── Turso Database ──────────────────────────────────────────────────────────
+
+const turso = createClient({
+  url:       process.env.TURSO_DATABASE_URL || "file:uploads.db",
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
+
+await turso.execute(`
+  CREATE TABLE IF NOT EXISTS uploads (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    wallet     TEXT NOT NULL,
+    blob_name  TEXT NOT NULL,
+    mime_type  TEXT,
+    size_bytes INTEGER,
+    expires_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+console.log("✅ Database connected");
+
 // ─── Shelby Client ───────────────────────────────────────────────────────────
-//
-//  ShelbyNodeClient is the server-side client for the Shelby Protocol.
-//  It talks to the Shelby RPC node and the Aptos blockchain.
-//
-//  ShelbyNetwork.SHELBYNET = Shelby testnet  (use for development)
-//  ShelbyNetwork.MAINNET   = production
-//
+
 const shelbyClient = new ShelbyNodeClient({
   network: Network.SHELBYNET,
 });
 
-// ─── Signer ──────────────────────────────────────────────────────────────────
-//
-//  Every upload requires an on-chain transaction signed by an Aptos account.
-//  The account also pays the storage fee in ShelbyUSD / APT.
-//  The private key lives in server/.env and never leaves the server.
-//
 const signer = Account.fromPrivateKey({
   privateKey: new Ed25519PrivateKey(PRIVATE_KEY),
 });
 
 console.log(`🔑 Signer address: ${signer.accountAddress}`);
 
-// ─── Multer (in-memory — no files written to disk) ───────────────────────────
+// ─── Multer ──────────────────────────────────────────────────────────────────
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB per file
+  limits: { fileSize: 50 * 1024 * 1024 },
 });
 
-// ─── Shared type (mirrors client/src/types.ts) ───────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface UploadedFile {
   originalName: string;
   mimeType: string;
   sizeBytes: number;
   blobName: string;
-  expiresAt: string;       // ISO 8601
+  expiresAt: string;
   signerAddress: string;
 }
 
 // ─── POST /api/upload ────────────────────────────────────────────────────────
-//
-//  Multipart form fields:
-//    files        (required) — one or more files, up to 10
-//    blobPrefix   (optional) — storage folder prefix, default "uploads"
-//    daysToExpire (optional) — how many days before the blob expires, default 7
-//
-//  Response:
-//    { success: true,  files: UploadedFile[] }
-//    { success: false, error: string }
-//
+
 app.post(
   "/api/upload",
   upload.array("files", 10),
@@ -92,41 +90,43 @@ app.post(
 
       const blobPrefix    = (req.body.blobPrefix   as string) || "uploads";
       const daysToExpire  = Math.max(1, Number(req.body.daysToExpire) || 7);
+      const walletAddress = (req.body.walletAddress as string) || "";
 
-      // Shelby SDK expects expiry as a Unix timestamp in MICROSECONDS
       const expirationMicros =
-        Date.now() * 1_000 +                        // now in µs
-        daysToExpire * 24 * 60 * 60 * 1_000_000;    // + N days in µs
+        Date.now() * 1_000 +
+        daysToExpire * 24 * 60 * 60 * 1_000_000;
 
       const results: UploadedFile[] = [];
 
       for (const file of files) {
-        // Build a unique, safe blob path  e.g. "uploads/1715000000000-photo.jpg"
         const safeName = path.basename(file.originalname).replace(/\s+/g, "_");
         const blobName = `${blobPrefix}/${Date.now()}-${safeName}`;
 
-        // ── Shelby SDK upload call ────────────────────────────────────────
-        //
-        //  client.upload() signature:
-        //    blobData        — Uint8Array  (Buffer satisfies this)
-        //    signer          — Aptos Account (signs + pays the transaction)
-        //    blobName        — path string, e.g. "uploads/photo.jpg"
-        //    expirationMicros — µs timestamp when the blob expires on-chain
-        //
         await shelbyClient.upload({
-          blobData: file.buffer,   // multer gives us a Buffer, which is a Uint8Array
+          blobData: file.buffer,
           signer,
           blobName,
           expirationMicros,
         });
-        // ─────────────────────────────────────────────────────────────────
+
+        // small delay to avoid nonce conflicts
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        const expiresAt = new Date(expirationMicros / 1_000).toISOString();
+
+        // Save to Turso DB — wallet owns this upload
+        await turso.execute({
+          sql: `INSERT INTO uploads (wallet, blob_name, mime_type, size_bytes, expires_at)
+                VALUES (?, ?, ?, ?, ?)`,
+          args: [walletAddress, blobName, file.mimetype, file.size, expiresAt],
+        });
 
         results.push({
           originalName:  file.originalname,
           mimeType:      file.mimetype,
           sizeBytes:     file.size,
           blobName,
-          expiresAt:     new Date(expirationMicros / 1_000).toISOString(),
+          expiresAt,
           signerAddress: signer.accountAddress.toString(),
         });
       }
@@ -138,103 +138,43 @@ app.post(
   }
 );
 
-// ─── GET /api/health ─────────────────────────────────────────────────────────
-
-app.get("/api/health", (_req, res) => {
-  res.json({
-    status:    "ok",
-    network:   "shelbynet",
-    signer:    signer.accountAddress.toString(),
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// ─── GET /api/history ─────────────────────────────────────────────────────────
+// ─── GET /api/history ────────────────────────────────────────────────────────
 
 app.get("/api/history", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const address = req.query.address as string;
     if (!address) {
-      res.status(400).json({ success: false, error: "address query param required" });
+      res.status(400).json({ success: false, error: "address required" });
       return;
     }
 
-    const indexerUrl = "https://api.shelbynet.aptoslabs.com/nocode/v1/public/alias/shelby/shelbynet/v1/graphql";
-    const headers = {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.APTOS_API_KEY || ""}`,
-      "x-api-key": process.env.APTOS_API_KEY || "",
-    };
-
-    // ── Fetch last 20 blobs ───────────────────────────────────────────────
-    const blobsQuery = `
-      query getBlobs($where: blobs_bool_exp, $orderBy: [blobs_order_by!], $limit: Int) {
-        blobs(where: $where, order_by: $orderBy, limit: $limit) {
-          owner
-          blob_name
-          expires_at
-          created_at
-          size
-          is_written
-        }
-      }
-    `;
-
-    // ── Fetch total count ─────────────────────────────────────────────────
-    const countQuery = `
-      query getBlobsCount($where: blobs_bool_exp) {
-        blobs_aggregate(where: $where) {
-          aggregate {
-            count
-          }
-        }
-      }
-    `;
-
-    const where = {
-      owner: { _eq: signer.accountAddress.toString() },
-      is_deleted: { _eq: 0 },
-    };
-
-    // Run both queries in parallel
-    const [blobsRes, countRes] = await Promise.all([
-      fetch(indexerUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          query: blobsQuery,
-          variables: { where, orderBy: [{ created_at: "desc" }], limit: 20 },
-        }),
+    const [blobsResult, countResult] = await Promise.all([
+      turso.execute({
+        sql: `SELECT * FROM uploads WHERE wallet = ? ORDER BY created_at DESC LIMIT 20`,
+        args: [address],
       }),
-      fetch(indexerUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          query: countQuery,
-          variables: { where },
-        }),
+      turso.execute({
+        sql: `SELECT COUNT(*) as count FROM uploads WHERE wallet = ?`,
+        args: [address],
       }),
     ]);
 
-    const blobsJson = await blobsRes.json() as any;
-    const countJson = await countRes.json() as any;
-
-    const totalUploads = countJson.data?.blobs_aggregate?.aggregate?.count ?? 0;
-
-    const blobs = (blobsJson.data?.blobs ?? []).map((b: any) => ({
-      blobName:  b.blob_name,
-      expiresAt: new Date(Number(b.expires_at) / 1000).toISOString(),
-      createdAt: new Date(Number(b.created_at) / 1000).toISOString(),
-      sizeBytes: Number(b.size),
-      isWritten: b.is_written === "1",
+    const blobs = blobsResult.rows.map((r) => ({
+      blobName:  r.blob_name  as string,
+      mimeType:  r.mime_type  as string,
+      sizeBytes: r.size_bytes as number,
+      expiresAt: r.expires_at as string,
+      createdAt: r.created_at as string,
+      isWritten: true,
     }));
 
-    res.json({ success: true, blobs, totalUploads });
+    const totalUploads = countResult.rows[0].count as number;
+
+    res.json({ success: true, totalUploads, blobs });
   } catch (err) {
     next(err);
   }
 });
-
 
 // ─── GET /api/preview ────────────────────────────────────────────────────────
 
@@ -257,8 +197,6 @@ app.get("/api/preview", async (req: Request, res: Response, next: NextFunction) 
       .replace(/^@[^/]+\//, "")
       .trim();
 
-    console.log("[preview] downloading:", relativeBlobName);
-
     const blob = await shelbyClient.download({
       account: signer.accountAddress,
       blobName: relativeBlobName,
@@ -275,7 +213,7 @@ app.get("/api/preview", async (req: Request, res: Response, next: NextFunction) 
 
     const mimeMap: Record<string, string> = {
       jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
-      gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", avif: "image/avif",
+      gif: "image/gif",  webp: "image/webp", svg: "image/svg+xml", avif: "image/avif",
     };
 
     res.setHeader("Content-Type", mimeMap[ext] || "application/octet-stream");
@@ -286,12 +224,22 @@ app.get("/api/preview", async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
+// ─── GET /api/health ─────────────────────────────────────────────────────────
 
-// ─── Global error handler ────────────────────────────────────────────────────
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status:    "ok",
+    network:   "shelbynet",
+    signer:    signer.accountAddress.toString(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ─── Global error handler ─────────────────────────────────────────────────────
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error("[upload error]", err.message);
-  res.status(500).json({ success: false, error: err.message || "Upload failed" });
+  console.error("[error]", err.message);
+  res.status(500).json({ success: false, error: err.message || "Server error" });
 });
 
 // ─── Start ───────────────────────────────────────────────────────────────────
