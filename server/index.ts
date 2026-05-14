@@ -110,12 +110,10 @@ app.post(
           expirationMicros,
         });
 
-        // small delay to avoid nonce conflicts
         await new Promise((resolve) => setTimeout(resolve, 1000));
 
         const expiresAt = new Date(expirationMicros / 1_000).toISOString();
 
-        // Save to Turso DB — wallet owns this upload
         await turso.execute({
           sql: `INSERT INTO uploads (wallet, blob_name, mime_type, size_bytes, expires_at)
                 VALUES (?, ?, ?, ?, ?)`,
@@ -132,15 +130,14 @@ app.post(
         });
       }
 
-   console.log(`[upload] ${results.length} file(s) uploaded by ${walletAddress}`);
-res.json({ success: true, files: results });
-
+      console.log(`[upload] ${results.length} file(s) uploaded by ${walletAddress}`);
       res.json({ success: true, files: results });
     } catch (err) {
       next(err);
     }
   }
 );
+
 
 // ─── GET /api/history ────────────────────────────────────────────────────────
 
