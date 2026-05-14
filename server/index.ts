@@ -138,7 +138,6 @@ app.post(
   }
 );
 
-
 // ─── GET /api/history ────────────────────────────────────────────────────────
 
 app.get("/api/history", async (req: Request, res: Response, next: NextFunction) => {
@@ -171,9 +170,7 @@ app.get("/api/history", async (req: Request, res: Response, next: NextFunction) 
 
     const totalUploads = countResult.rows[0].count as number;
 
-console.log(`[history] ${blobs.length} blobs fetched for ${address}`);
-res.json({ success: true, totalUploads, blobs });
-
+    console.log(`[history] ${blobs.length} blobs fetched for ${address}`);
     res.json({ success: true, totalUploads, blobs });
   } catch (err) {
     next(err);
