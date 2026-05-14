@@ -132,6 +132,9 @@ app.post(
         });
       }
 
+   console.log(`[upload] ${results.length} file(s) uploaded by ${walletAddress}`);
+res.json({ success: true, files: results });
+
       res.json({ success: true, files: results });
     } catch (err) {
       next(err);
@@ -170,6 +173,9 @@ app.get("/api/history", async (req: Request, res: Response, next: NextFunction) 
     }));
 
     const totalUploads = countResult.rows[0].count as number;
+
+console.log(`[history] ${blobs.length} blobs fetched for ${address}`);
+res.json({ success: true, totalUploads, blobs });
 
     res.json({ success: true, totalUploads, blobs });
   } catch (err) {
