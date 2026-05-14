@@ -5,6 +5,7 @@ import "./WalletBar.css";
 export default function WalletBar() {
   const { connected, account, wallet, wallets, connect, disconnect } = useWallet();
   const [showModal, setShowModal] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
 
   if (connected && account) {
     const addr = account.address.toString();
@@ -26,8 +27,17 @@ export default function WalletBar() {
 
   return (
     <div className="walletbar">
-      <button className="btn btn--primary" onClick={() => setShowModal(true)}>
-        Connect Wallet
+      <button
+        className="btn btn--primary"
+        onClick={() => {
+          setModalLoading(true);
+          setTimeout(() => {
+            setModalLoading(false);
+            setShowModal(true);
+          }, 300);
+        }}
+      >
+        {modalLoading ? "Loading..." : "Connect Wallet"}
       </button>
 
       {showModal && (
