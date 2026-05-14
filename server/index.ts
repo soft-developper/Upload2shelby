@@ -246,6 +246,8 @@ app.get("/api/health", (_req, res) => {
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error("[error]", err.message);
+  console.error(err);
+  if (res.headersSent) return;
   res.status(500).json({ success: false, error: err.message || "Server error" });
 });
 
