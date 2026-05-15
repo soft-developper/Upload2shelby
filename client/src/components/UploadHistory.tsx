@@ -77,7 +77,7 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [renewing, setRenewing] = useState<string | null>(null);
   const [shareLink, setShareLink] = useState<string | null>(null);
-  const [refresh, setRefresh] = useState(0);
+  const [renewRefresh, setRenewRefresh] = useState(0);
 
   const fetchHistory = () => {
     if (!walletAddress) return;
@@ -97,7 +97,7 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
       .finally(() => setLoading(false));
   };
 
-useEffect(() => { fetchHistory(); }, [walletAddress ]); 
+useEffect(() => { fetchHistory(); }, [walletAddress, refresh, renewRefresh]); 
  
   // ── Derived dashboard stats ──────────────────────────────────────────────
   const totalSize = history.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
@@ -117,7 +117,7 @@ useEffect(() => { fetchHistory(); }, [walletAddress ]);
       });
       const data = await res.json();
       if (data.success) {
-        setRefresh((r) => r + 1);
+        setRenewRefresh((r) => r + 1);
       } else {
         alert("Renewal failed: " + data.error);
       }
