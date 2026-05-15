@@ -97,8 +97,8 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
       .finally(() => setLoading(false));
   };
 
- useEffect(() => { fetchHistory(); }, [walletAddress, refresh, historyRefresh]);
-
+useEffect(() => { fetchHistory(); }, [walletAddress, refresh]); 
+ 
   // ── Derived dashboard stats ──────────────────────────────────────────────
   const totalSize = history.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
   const expiringThisWeek = history.filter((f) => {
