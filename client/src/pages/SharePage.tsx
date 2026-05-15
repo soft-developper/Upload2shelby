@@ -1,14 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import "../App.css";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
-function formatBytes(bytes: number): string {
-  if (!bytes) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-}
+
 
 function getFileType(name: string) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
