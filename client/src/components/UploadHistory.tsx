@@ -7,6 +7,7 @@ interface Props {
 
 interface HistoryItem {
   blobName: string;
+  mimeType: string;
   expiresAt: string;
   createdAt: string;
   sizeBytes: number;
@@ -30,6 +31,11 @@ function getFileType(blobName: string): "image" | "video" | "audio" | "pdf" | "z
   if (ext === "pdf") return "pdf";
   if (["zip", "tar", "gz", "rar", "7z"].includes(ext)) return "zip";
   return "file";
+}
+
+function daysUntilExpiry(expiresAt: string): number {
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
 function FileIcon({ type }: { type: ReturnType<typeof getFileType> }) {
@@ -60,7 +66,6 @@ function HistoryThumb({ item }: { item: HistoryItem }) {
       </div>
     );
   }
-
   return <FileIcon type={type} />;
 }
 
@@ -69,8 +74,10 @@ export default function UploadHistory({ walletAddress }: Props) {
   const [totalUploads, setTotalUploads] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [renewing, setRenewing] = useState<string | null>(null);
+  const [shareLink, setShareLink] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchHistory = () => {
     if (!walletAddress) return;
     setLoading(true);
     setError(null);
@@ -86,17 +93,85 @@ export default function UploadHistory({ walletAddress }: Props) {
       })
       .catch(() => setError("Could not reach server"))
       .finally(() => setLoading(false));
-  }, [walletAddress]);
+  };
+
+  useEffect(() => { fetchHistory(); }, [walletAddress]);
+
+  // ── Derived dashboard stats ──────────────────────────────────────────────
+  const totalSize = history.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+  const expiringThisWeek = history.filter((f) => {
+    const days = daysUntilExpiry(f.expiresAt);
+    return days >= 0 && days <= 7;
+  }).length;
+
+  // ── Renew blob ────────────────────────────────────────────────────────────
+  const handleRenew = async (blobName: string) => {
+    setRenewing(blobName);
+    try {
+      const res = await fetch(`${API}/api/renew`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blobName, walletAddress, daysToExtend: 7 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchHistory();
+      } else {
+        alert("Renewal failed: " + data.error);
+      }
+    } catch {
+      alert("Renewal failed — server unreachable");
+    } finally {
+      setRenewing(null);
+    }
+  };
+
+  // ── Download blob ─────────────────────────────────────────────────────────
+  const handleDownload = async (item: HistoryItem) => {
+    const fileName = (item.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
+    const url = `${API}/api/download?blobName=${encodeURIComponent(item.blobName)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+  };
+
+  // ── Share blob ────────────────────────────────────────────────────────────
+  const handleShare = (item: HistoryItem) => {
+    const encoded = encodeURIComponent(item.blobName);
+    const link = `${window.location.origin}/share?blob=${encoded}`;
+    setShareLink(link);
+    navigator.clipboard.writeText(link).catch(() => {});
+  };
 
   return (
     <section className="history">
+
+      {/* ── Dashboard Stats ─────────────────────────────────────────────── */}
+      {totalUploads > 0 && (
+        <div className="dashboard">
+          <div className="dashboard__stat">
+            <span className="dashboard__value">{totalUploads}</span>
+            <span className="dashboard__label">Total uploads</span>
+          </div>
+          <div className="dashboard__stat">
+            <span className="dashboard__value">{formatBytes(totalSize)}</span>
+            <span className="dashboard__label">Storage used</span>
+          </div>
+          <div className="dashboard__stat">
+            <span className={`dashboard__value ${expiringThisWeek > 0 ? "dashboard__value--warn" : ""}`}>
+              {expiringThisWeek}
+            </span>
+            <span className="dashboard__label">Expiring this week</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="history__header">
         <h2 className="history__title">Upload History</h2>
         {totalUploads > 0 && (
           <div className="history__stats">
-            <span className="history__total">
-              {totalUploads} total upload{totalUploads !== 1 ? "s" : ""}
-            </span>
             {totalUploads > 20 && (
               <span className="history__showing">showing last 20</span>
             )}
@@ -104,35 +179,86 @@ export default function UploadHistory({ walletAddress }: Props) {
         )}
       </div>
 
+      {/* ── Share link toast ────────────────────────────────────────────── */}
+      {shareLink && (
+        <div className="share-toast">
+          <span>Link copied to clipboard</span>
+          <code className="share-toast__link">{shareLink}</code>
+          <button className="share-toast__close" onClick={() => setShareLink(null)}>×</button>
+        </div>
+      )}
+
       {loading && <p className="history__state">Loading...</p>}
       {error && <p className="history__state history__state--error">{error}</p>}
       {!loading && !error && history.length === 0 && (
         <p className="history__state">No uploads found for this wallet.</p>
       )}
 
+      {/* ── File list ───────────────────────────────────────────────────── */}
       {history.length > 0 && (
         <ul className="history__list">
-          {history.map((item, i) => (
-            <li key={i} className="history__item">
-              <HistoryThumb item={item} />
-              <div className="history__item-body">
-                <div className="history__blob-name" title={item.blobName}>
-                  {(item.blobName.split("/").pop() ?? "").replace(/^\d+-/, "")}
+          {history.map((item, i) => {
+            const days = daysUntilExpiry(item.expiresAt);
+            const isExpiringSoon = days >= 0 && days <= 3;
+            const isExpired = days < 0;
+
+            return (
+              <li key={i} className="history__item">
+                <HistoryThumb item={item} />
+
+                <div className="history__item-body">
+                  <div className="history__blob-name" title={item.blobName}>
+                    {(item.blobName.split("/").pop() ?? "").replace(/^\d+-/, "")}
+                  </div>
+                  <div className="history__meta">
+                    <span>{formatBytes(item.sizeBytes)}</span>
+                    <span className="history__sep">·</span>
+                    <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                    <span className="history__sep">·</span>
+                    <span className={
+                      isExpired ? "history__status--error" :
+                      isExpiringSoon ? "history__status--warn" :
+                      "history__status--done"
+                    }>
+                      {isExpired
+                        ? "Expired"
+                        : days === 0
+                        ? "Expires today"
+                        : `Exp. in ${days}d`}
+                    </span>
+                  </div>
                 </div>
-                <div className="history__meta">
-                  <span>{formatBytes(item.sizeBytes)}</span>
-                  <span className="history__sep">·</span>
-                  <span>{new Date(item.createdAt).toLocaleDateString()}</span>
-                  <span className="history__sep">·</span>
-                  <span>Exp. {new Date(item.expiresAt).toLocaleDateString()}</span>
-                  <span className="history__sep">·</span>
-                  <span className={item.isWritten ? "history__status--done" : "history__status--pending"}>
-                    {item.isWritten ? "✓" : "⏳"}
-                  </span>
+
+                {/* ── Action buttons ───────────────────────────────────── */}
+                <div className="history__actions">
+                  <button
+                    className="history__btn history__btn--share"
+                    onClick={() => handleShare(item)}
+                    title="Copy share link"
+                  >
+                    🔗
+                  </button>
+                  <button
+                    className="history__btn history__btn--download"
+                    onClick={() => handleDownload(item)}
+                    title="Download file"
+                  >
+                    ⬇
+                  </button>
+                  {!isExpired && (
+                    <button
+                      className="history__btn history__btn--renew"
+                      onClick={() => handleRenew(item.blobName)}
+                      disabled={renewing === item.blobName}
+                      title="Extend expiry by 7 days"
+                    >
+                      {renewing === item.blobName ? "..." : "↻"}
+                    </button>
+                  )}
                 </div>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

@@ -236,6 +236,107 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+// ─── POST /api/renew ─────────────────────────────────────────────────────────
+//
+//  Extends a blob's expiry by re-uploading it with a new expirationMicros.
+//  Body: { blobName, walletAddress, daysToExtend }
+
+app.post("/api/renew", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { blobName, walletAddress, daysToExtend = 7 } = req.body as {
+      blobName: string;
+      walletAddress: string;
+      daysToExtend: number;
+    };
+
+    if (!blobName) {
+      res.status(400).json({ success: false, error: "blobName required" });
+      return;
+    }
+
+    const relativeBlobName = blobName.replace(/^@[^/]+\//, "").trim();
+
+    // Download the existing blob
+    const blob = await shelbyClient.download({
+      account: signer.accountAddress,
+      blobName: relativeBlobName,
+    });
+
+    const chunks: Uint8Array[] = [];
+    const reader = blob.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
+    }
+    const blobData = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+
+    // Re-upload with new expiry
+    const expirationMicros =
+      Date.now() * 1_000 + daysToExtend * 24 * 60 * 60 * 1_000_000;
+
+    await shelbyClient.upload({
+      blobData,
+      signer,
+      blobName: relativeBlobName,
+      expirationMicros,
+    });
+
+    const expiresAt = new Date(expirationMicros / 1_000).toISOString();
+
+    // Update Turso DB
+    await turso.execute({
+      sql: `UPDATE uploads SET expires_at = ? WHERE blob_name = ? AND wallet = ?`,
+      args: [expiresAt, blobName, walletAddress],
+    });
+
+    console.log(`[renew] ${blobName} extended by ${daysToExtend} days`);
+    res.json({ success: true, expiresAt });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /api/download ───────────────────────────────────────────────────────
+//
+//  Downloads any blob and streams it to the browser as a file attachment.
+//  Query: ?blobName=@0xabc.../uploads/file.mp4
+
+app.get("/api/download", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const blobName = req.query.blobName as string;
+    if (!blobName) {
+      res.status(400).json({ error: "blobName required" });
+      return;
+    }
+
+    const relativeBlobName = blobName.replace(/^@[^/]+\//, "").trim();
+    const fileName = (blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
+
+    const blob = await shelbyClient.download({
+      account: signer.accountAddress,
+      blobName: relativeBlobName,
+    });
+
+    const chunks: Uint8Array[] = [];
+    const reader = blob.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
+    }
+    const buffer = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Length", buffer.length);
+    res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+
 // ─── Global error handler ─────────────────────────────────────────────────────
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
