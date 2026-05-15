@@ -67,7 +67,7 @@ export default function App() {
     const formData = new FormData();
     pending.forEach((qf) => formData.append("files", qf.file));
     formData.append("blobPrefix", "uploads");
-    formData.append("daysToExpire", "7");
+    formData.append("daysToExpire", "360");
     formData.append("signature", signature);
     formData.append("walletAddress", walletAddress);
 
