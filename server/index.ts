@@ -90,7 +90,7 @@ app.post(
       }
 
       const blobPrefix    = (req.body.blobPrefix   as string) || "uploads";
-      const daysToExpire  = Math.max(1, Number(req.body.daysToExpire) || 7);
+      const daysToExpire  = Math.max(1, Number(req.body.daysToExpire) || 360);
       const walletAddress = (req.body.walletAddress as string) || "";
 
       const expirationMicros =
@@ -243,7 +243,7 @@ app.get("/api/health", (_req, res) => {
 
 app.post("/api/renew", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { blobName, walletAddress, daysToExtend = 7 } = req.body as {
+    const { blobName, walletAddress, daysToExtend = 360 } = req.body as {
       blobName: string;
       walletAddress: string;
       daysToExtend: number;

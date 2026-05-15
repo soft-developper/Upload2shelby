@@ -76,6 +76,7 @@ export default function UploadHistory({ walletAddress }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [renewing, setRenewing] = useState<string | null>(null);
   const [shareLink, setShareLink] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
 
   const fetchHistory = () => {
     if (!walletAddress) return;
@@ -95,7 +96,7 @@ export default function UploadHistory({ walletAddress }: Props) {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchHistory(); }, [walletAddress]);
+  useEffect(() => { fetchHistory(); }, [walletAddress, refresh]);
 
   // ── Derived dashboard stats ──────────────────────────────────────────────
   const totalSize = history.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
@@ -111,11 +112,11 @@ export default function UploadHistory({ walletAddress }: Props) {
       const res = await fetch(`${API}/api/renew`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blobName, walletAddress, daysToExtend: 7 }),
+        body: JSON.stringify({ blobName, walletAddress, daysToExtend: 360 }),
       });
       const data = await res.json();
       if (data.success) {
-        fetchHistory();
+        setRefresh((r) => r + 1);
       } else {
         alert("Renewal failed: " + data.error);
       }
@@ -250,7 +251,7 @@ export default function UploadHistory({ walletAddress }: Props) {
                       className="history__btn history__btn--renew"
                       onClick={() => handleRenew(item.blobName)}
                       disabled={renewing === item.blobName}
-                      title="Extend expiry by 7 days"
+                      title="Extend expiry by 360 days"
                     >
                       {renewing === item.blobName ? "..." : "↻"}
                     </button>
