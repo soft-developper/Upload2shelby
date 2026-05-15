@@ -3,6 +3,7 @@ import "./UploadHistory.css";
 
 interface Props {
   walletAddress: string;
+  refresh?: number;
 }
 
 interface HistoryItem {
@@ -69,7 +70,7 @@ function HistoryThumb({ item }: { item: HistoryItem }) {
   return <FileIcon type={type} />;
 }
 
-export default function UploadHistory({ walletAddress }: Props) {
+export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [totalUploads, setTotalUploads] = useState<number>(0);
   const [loading, setLoading] = useState(false);

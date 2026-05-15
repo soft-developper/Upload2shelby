@@ -14,6 +14,7 @@ export default function App() {
   const { connected, account, signMessage } = useWallet();
   const [queue, setQueue] = useState<QueuedFile[]>([]);
   const [confirmed, setConfirmed] = useState<UploadedFile[]>([]);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -89,6 +90,7 @@ export default function App() {
         )
       );
       setConfirmed((prev) => [...prev, ...result.files]);
+      setHistoryRefresh((r) => r + 1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Upload failed";
       setQueue((q) =>
@@ -153,7 +155,7 @@ export default function App() {
               <ConfirmationPanel files={confirmed} onDismiss={clearConfirmed} />
             )}
 
-            <UploadHistory walletAddress={account?.address.toString() ?? ""} />
+            <UploadHistory walletAddress={account?.address.toString() ?? ""} refresh={historyRefresh} />
           </>
         )}
       </main>
