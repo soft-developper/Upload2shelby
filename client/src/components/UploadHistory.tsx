@@ -15,6 +15,8 @@ interface HistoryItem {
   isWritten: boolean;
 }
 
+type FileCategory = "Images" | "Videos" | "Audio" | "Documents" | "Archives" | "Other";
+
 const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
 function formatBytes(bytes: number): string {
@@ -24,14 +26,22 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
-function getFileType(blobName: string): "image" | "video" | "audio" | "pdf" | "zip" | "file" {
+function getCategory(blobName: string): FileCategory {
   const ext = blobName.split(".").pop()?.toLowerCase() ?? "";
-  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "avif"].includes(ext)) return "image";
-  if (["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return "video";
-  if (["mp3", "wav", "aac", "ogg", "flac"].includes(ext)) return "audio";
-  if (ext === "pdf") return "pdf";
-  if (["zip", "tar", "gz", "rar", "7z"].includes(ext)) return "zip";
-  return "file";
+  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "avif"].includes(ext)) return "Images";
+  if (["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return "Videos";
+  if (["mp3", "wav", "aac", "ogg", "flac"].includes(ext)) return "Audio";
+  if (["pdf", "doc", "docx", "txt", "xls", "xlsx", "ppt", "pptx"].includes(ext)) return "Documents";
+  if (["zip", "tar", "gz", "rar", "7z"].includes(ext)) return "Archives";
+  return "Other";
+}
+
+function getCategoryIcon(cat: FileCategory): string {
+  const icons: Record<FileCategory, string> = {
+    Images: "🖼", Videos: "🎬", Audio: "🎵",
+    Documents: "📄", Archives: "🗜", Other: "📁",
+  };
+  return icons[cat];
 }
 
 function daysUntilExpiry(expiresAt: string): number {
@@ -39,22 +49,11 @@ function daysUntilExpiry(expiresAt: string): number {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
-function FileIcon({ type }: { type: ReturnType<typeof getFileType> }) {
-  const icons: Record<string, string> = {
-    video: "🎬", audio: "🎵", pdf: "📄", zip: "🗜", file: "📁",
-  };
-  return (
-    <div className="history__thumb history__thumb--icon">
-      <span>{icons[type] ?? "📁"}</span>
-    </div>
-  );
-}
-
 function HistoryThumb({ item }: { item: HistoryItem }) {
-  const type = getFileType(item.blobName);
+  const cat = getCategory(item.blobName);
   const [imgError, setImgError] = useState(false);
 
-  if (type === "image" && !imgError) {
+  if (cat === "Images" && !imgError) {
     return (
       <div className="history__thumb">
         <img
@@ -67,7 +66,85 @@ function HistoryThumb({ item }: { item: HistoryItem }) {
       </div>
     );
   }
-  return <FileIcon type={type} />;
+  return (
+    <div className="history__thumb history__thumb--icon">
+      <span>{getCategoryIcon(cat)}</span>
+    </div>
+  );
+}
+
+function RenewModal({
+  blobName,
+  walletAddress,
+  onClose,
+  onSuccess,
+}: {
+  blobName: string;
+  walletAddress: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [days, setDays] = useState(30);
+  const [loading, setLoading] = useState(false);
+
+  const handleRenew = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/renew`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blobName, walletAddress, daysToExtend: days }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        onSuccess();
+        onClose();
+      } else {
+        alert("Renewal failed: " + data.error);
+      }
+    } catch {
+      alert("Renewal failed — server unreachable");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal__header">
+          <h3 className="modal__title">Extend Expiry</h3>
+          <button className="modal__close" onClick={onClose}>×</button>
+        </div>
+        <div className="modal__body">
+          <p className="modal__label">Extend by <strong>{days} days</strong></p>
+          <input
+            type="range"
+            min={30}
+            max={360}
+            step={30}
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="modal__slider"
+          />
+          <div className="modal__slider-labels">
+            <span>30d</span>
+            <span>180d</span>
+            <span>360d</span>
+          </div>
+          <p className="modal__hint">
+            New expiry: {new Date(Date.now() + days * 86400000).toLocaleDateString()}
+          </p>
+        </div>
+        <div className="modal__footer">
+          <button className="btn btn--ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn--primary" onClick={handleRenew} disabled={loading}>
+            {loading ? "Extending..." : `Extend ${days} days`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
@@ -75,9 +152,10 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
   const [totalUploads, setTotalUploads] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [renewing, setRenewing] = useState<string | null>(null);
+  const [renewTarget, setRenewTarget] = useState<string | null>(null);
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [renewRefresh, setRenewRefresh] = useState(0);
+  const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
 
   const fetchHistory = () => {
     if (!walletAddress) return;
@@ -89,6 +167,11 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
         if (data.success) {
           setHistory(data.blobs);
           setTotalUploads(data.totalUploads);
+          // open all categories by default
+          const cats = Array.from(new Set(data.blobs.map((b: HistoryItem) => getCategory(b.blobName))));
+          const initial: Record<string, boolean> = {};
+          cats.forEach((c) => { initial[c as string] = true; });
+          setOpenCategories(initial);
         } else {
           setError(data.error || "Failed to load history");
         }
@@ -97,39 +180,31 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
       .finally(() => setLoading(false));
   };
 
-useEffect(() => { fetchHistory(); }, [walletAddress, refresh, renewRefresh]); 
- 
-  // ── Derived dashboard stats ──────────────────────────────────────────────
+  useEffect(() => { fetchHistory(); }, [walletAddress, refresh, renewRefresh]);
+
+  // ── Dashboard stats ──────────────────────────────────────────────────────
   const totalSize = history.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
   const expiringThisWeek = history.filter((f) => {
-    const days = daysUntilExpiry(f.expiresAt);
-    return days >= 0 && days <= 7;
+    const d = daysUntilExpiry(f.expiresAt);
+    return d >= 0 && d <= 7;
   }).length;
 
-  // ── Renew blob ────────────────────────────────────────────────────────────
-  const handleRenew = async (blobName: string) => {
-    setRenewing(blobName);
-    try {
-      const res = await fetch(`${API}/api/renew`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blobName, walletAddress, daysToExtend: 360 }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setRenewRefresh((r) => r + 1);
-      } else {
-        alert("Renewal failed: " + data.error);
-      }
-    } catch {
-      alert("Renewal failed — server unreachable");
-    } finally {
-      setRenewing(null);
-    }
-  };
+  // ── Group by category ────────────────────────────────────────────────────
+  const grouped = history.reduce<Record<FileCategory, HistoryItem[]>>(
+    (acc, item) => {
+      const cat = getCategory(item.blobName);
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(item);
+      return acc;
+    },
+    {} as Record<FileCategory, HistoryItem[]>
+  );
 
-  // ── Download blob ─────────────────────────────────────────────────────────
-  const handleDownload = async (item: HistoryItem) => {
+  const categoryOrder: FileCategory[] = ["Images", "Videos", "Audio", "Documents", "Archives", "Other"];
+  const activeCategories = categoryOrder.filter((c) => grouped[c]?.length > 0);
+
+  // ── Download ─────────────────────────────────────────────────────────────
+  const handleDownload = (item: HistoryItem) => {
     const fileName = (item.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
     const url = `${API}/api/download?blobName=${encodeURIComponent(item.blobName)}`;
     const a = document.createElement("a");
@@ -138,7 +213,7 @@ useEffect(() => { fetchHistory(); }, [walletAddress, refresh, renewRefresh]);
     a.click();
   };
 
-  // ── Share blob ────────────────────────────────────────────────────────────
+  // ── Share ─────────────────────────────────────────────────────────────────
   const handleShare = (item: HistoryItem) => {
     const encoded = encodeURIComponent(item.blobName);
     const link = `${window.location.origin}/share?blob=${encoded}`;
@@ -146,10 +221,24 @@ useEffect(() => { fetchHistory(); }, [walletAddress, refresh, renewRefresh]);
     navigator.clipboard.writeText(link).catch(() => {});
   };
 
+  const toggleCategory = (cat: string) => {
+    setOpenCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
+  };
+
   return (
     <section className="history">
 
-      {/* ── Dashboard Stats ─────────────────────────────────────────────── */}
+      {/* ── Renew modal ───────────────────────────────────────────────── */}
+      {renewTarget && (
+        <RenewModal
+          blobName={renewTarget}
+          walletAddress={walletAddress}
+          onClose={() => setRenewTarget(null)}
+          onSuccess={() => setRenewRefresh((r) => r + 1)}
+        />
+      )}
+
+      {/* ── Dashboard Stats ───────────────────────────────────────────── */}
       {totalUploads > 0 && (
         <div className="dashboard">
           <div className="dashboard__stat">
@@ -169,19 +258,15 @@ useEffect(() => { fetchHistory(); }, [walletAddress, refresh, renewRefresh]);
         </div>
       )}
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/* ── Header ───────────────────────────────────────────────────── */}
       <div className="history__header">
         <h2 className="history__title">Upload History</h2>
-        {totalUploads > 0 && (
-          <div className="history__stats">
-            {totalUploads > 20 && (
-              <span className="history__showing">showing last 20</span>
-            )}
-          </div>
+        {totalUploads > 20 && (
+          <span className="history__showing">showing last 20</span>
         )}
       </div>
 
-      {/* ── Share link toast ────────────────────────────────────────────── */}
+      {/* ── Share toast ───────────────────────────────────────────────── */}
       {shareLink && (
         <div className="share-toast">
           <span>Link copied to clipboard</span>
@@ -196,73 +281,77 @@ useEffect(() => { fetchHistory(); }, [walletAddress, refresh, renewRefresh]);
         <p className="history__state">No uploads found for this wallet.</p>
       )}
 
-      {/* ── File list ───────────────────────────────────────────────────── */}
-      {history.length > 0 && (
-        <ul className="history__list">
-          {history.map((item, i) => {
-            const days = daysUntilExpiry(item.expiresAt);
-            const isExpiringSoon = days >= 0 && days <= 3;
-            const isExpired = days < 0;
+      {/* ── Grouped categories ────────────────────────────────────────── */}
+      {activeCategories.map((cat) => (
+        <div key={cat} className="history__group">
+          <button
+            className="history__group-header"
+            onClick={() => toggleCategory(cat)}
+          >
+            <span className="history__group-icon">{getCategoryIcon(cat)}</span>
+            <span className="history__group-title">{cat}</span>
+            <span className="history__group-count">{grouped[cat].length}</span>
+            <span className="history__group-chevron">
+              {openCategories[cat] ? "▲" : "▼"}
+            </span>
+          </button>
 
-            return (
-              <li key={i} className="history__item">
-                <HistoryThumb item={item} />
+          {openCategories[cat] && (
+            <ul className="history__list">
+              {grouped[cat].map((item, i) => {
+                const days = daysUntilExpiry(item.expiresAt);
+                const isExpiringSoon = days >= 0 && days <= 3;
+                const isExpired = days < 0;
 
-                <div className="history__item-body">
-                  <div className="history__blob-name" title={item.blobName}>
-                    {(item.blobName.split("/").pop() ?? "").replace(/^\d+-/, "")}
-                  </div>
-                  <div className="history__meta">
-                    <span>{formatBytes(item.sizeBytes)}</span>
-                    <span className="history__sep">·</span>
-                    <span>{new Date(item.createdAt).toLocaleDateString()}</span>
-                    <span className="history__sep">·</span>
-                    <span className={
-                      isExpired ? "history__status--error" :
-                      isExpiringSoon ? "history__status--warn" :
-                      "history__status--done"
-                    }>
-                      {isExpired
-                        ? "Expired"
-                        : days === 0
-                        ? "Expires today"
-                        : `Exp. in ${days}d`}
-                    </span>
-                  </div>
-                </div>
+                return (
+                  <li key={i} className="history__item">
+                    <HistoryThumb item={item} />
 
-                {/* ── Action buttons ───────────────────────────────────── */}
-                <div className="history__actions">
-                  <button
-                    className="history__btn history__btn--share"
-                    onClick={() => handleShare(item)}
-                    title="Copy share link"
-                  >
-                    🔗
-                  </button>
-                  <button
-                    className="history__btn history__btn--download"
-                    onClick={() => handleDownload(item)}
-                    title="Download file"
-                  >
-                    ⬇
-                  </button>
-                  {!isExpired && (
-                    <button
-                      className="history__btn history__btn--renew"
-                      onClick={() => handleRenew(item.blobName)}
-                      disabled={renewing === item.blobName}
-                      title="Extend expiry by 360 days"
-                    >
-                      {renewing === item.blobName ? "..." : "↻"}
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                    <div className="history__item-body">
+                      <div className="history__blob-name" title={item.blobName}>
+                        {(item.blobName.split("/").pop() ?? "").replace(/^\d+-/, "")}
+                      </div>
+                      <div className="history__meta">
+                        <span>{formatBytes(item.sizeBytes)}</span>
+                        <span className="history__sep">·</span>
+                        <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                        <span className="history__sep">·</span>
+                        <span className={
+                          isExpired ? "history__status--error" :
+                          isExpiringSoon ? "history__status--warn" :
+                          "history__status--done"
+                        }>
+                          {isExpired ? "Expired" : days === 0 ? "Expires today" : `Exp. in ${days}d`}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="history__actions">
+                      <button
+                        className="history__btn history__btn--share"
+                        onClick={() => handleShare(item)}
+                        title="Copy share link"
+                      >🔗</button>
+                      <button
+                        className="history__btn history__btn--download"
+                        onClick={() => handleDownload(item)}
+                        title="Download file"
+                      >⬇</button>
+                      {!isExpired && (
+                        <button
+                          className="history__btn history__btn--renew"
+                          onClick={() => setRenewTarget(item.blobName)}
+                          title="Extend expiry"
+                        >↻</button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      ))}
     </section>
   );
 }

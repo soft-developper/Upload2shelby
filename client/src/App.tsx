@@ -1,3 +1,4 @@
+import DurationSlider from "./components/DurationSlider";
 import { useState, useCallback, useRef } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import WalletBar from "./components/WalletBar";
@@ -16,6 +17,7 @@ export default function App() {
   const [confirmed, setConfirmed] = useState<UploadedFile[]>([]);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [storageDays, setStorageDays] = useState(30);
   const [signError, setSignError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -68,7 +70,7 @@ export default function App() {
     const formData = new FormData();
     pending.forEach((qf) => formData.append("files", qf.file));
     formData.append("blobPrefix", "uploads");
-    formData.append("daysToExpire", "360");
+    formData.append("daysToExpire", storageDays.toString());
     formData.append("signature", signature);
     formData.append("walletAddress", walletAddress);
 
@@ -136,6 +138,11 @@ export default function App() {
         ) : (
           <>
             <DropZone onFiles={enqueue} disabled={isUploading} />
+<DurationSlider
+  days={storageDays}
+  onChange={setStorageDays}
+  disabled={isUploading}
+/>
 
             {signError && (
               <div className="sign-error">{signError}</div>
