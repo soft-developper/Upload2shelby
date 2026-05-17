@@ -241,6 +241,8 @@ app.get("/api/health", (_req, res) => {
 //  Extends a blob's expiry by re-uploading it with a new expirationMicros.
 //  Body: { blobName, walletAddress, daysToExtend }
 
+// ─── POST /api/renew without neglecting the original validity ─────────────────────────────────────────────────────────
+
 app.post("/api/renew", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { blobName, walletAddress, daysToExtend = 30 } = req.body as {
@@ -255,6 +257,23 @@ app.post("/api/renew", async (req: Request, res: Response, next: NextFunction) =
     }
 
     const relativeBlobName = blobName.replace(/^@[^/]+\//, "").trim();
+
+    // Fetch current expiry from Turso DB
+    const current = await turso.execute({
+      sql: `SELECT expires_at FROM uploads WHERE blob_name = ? AND wallet = ?`,
+      args: [blobName, walletAddress],
+    });
+
+    const currentExpiresAt = current.rows[0]?.expires_at as string | undefined;
+
+    // Base new expiry on current expiry date, not now
+    // Final validity = current expiry + added days
+    const baseTime = currentExpiresAt
+      ? new Date(currentExpiresAt).getTime()
+      : Date.now();
+
+    const expirationMicros =
+      baseTime * 1_000 + daysToExtend * 24 * 60 * 60 * 1_000_000;
 
     // Download the existing blob
     const blob = await shelbyClient.download({
@@ -272,9 +291,6 @@ app.post("/api/renew", async (req: Request, res: Response, next: NextFunction) =
     const blobData = Buffer.concat(chunks.map((c) => Buffer.from(c)));
 
     // Re-upload with new expiry
-    const expirationMicros =
-      Date.now() * 1_000 + daysToExtend * 24 * 60 * 60 * 1_000_000;
-
     await shelbyClient.upload({
       blobData,
       signer,
@@ -284,18 +300,19 @@ app.post("/api/renew", async (req: Request, res: Response, next: NextFunction) =
 
     const expiresAt = new Date(expirationMicros / 1_000).toISOString();
 
-    // Update Turso DB
+    // Update Turso DB with new expiry
     await turso.execute({
       sql: `UPDATE uploads SET expires_at = ? WHERE blob_name = ? AND wallet = ?`,
       args: [expiresAt, blobName, walletAddress],
     });
 
-    console.log(`[renew] ${blobName} extended by ${daysToExtend} days`);
+    console.log(`[renew] ${blobName} extended by ${daysToExtend} days from ${currentExpiresAt} → ${expiresAt}`);
     res.json({ success: true, expiresAt });
   } catch (err) {
     next(err);
   }
 });
+
 
 // ─── GET /api/download ───────────────────────────────────────────────────────
 //
