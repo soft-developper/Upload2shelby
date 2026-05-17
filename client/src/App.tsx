@@ -104,7 +104,7 @@ export default function App() {
       setIsUploading(false);
       abortRef.current = null;
     }
-  }, [queue, account, signMessage]);
+  }, [queue, account, signMessage,storageDays]);
 
   const clearQueue = useCallback(() => {
     setQueue((q) => q.filter((f) => f.status !== "done"));
