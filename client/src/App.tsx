@@ -93,6 +93,7 @@ export default function App() {
       );
       setConfirmed((prev) => [...prev, ...result.files]);
       setHistoryRefresh((r) => r + 1);
+      setStorageDays(30);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Upload failed";
       setQueue((q) =>
