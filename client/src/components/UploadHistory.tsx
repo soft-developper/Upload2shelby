@@ -170,7 +170,7 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
           // open all categories by default
           const cats = Array.from(new Set(data.blobs.map((b: HistoryItem) => getCategory(b.blobName))));
           const initial: Record<string, boolean> = {};
-          cats.forEach((c) => { initial[c as string] = true; });
+          cats.forEach((c) => { initial[c as string] = false; });
           setOpenCategories(initial);
         } else {
           setError(data.error || "Failed to load history");
