@@ -137,7 +137,6 @@ app.post(
     }
   }
 );
-
 // ─── GET /api/history ────────────────────────────────────────────────────────
 
 app.get("/api/history", async (req: Request, res: Response, next: NextFunction) => {
@@ -150,7 +149,7 @@ app.get("/api/history", async (req: Request, res: Response, next: NextFunction) 
 
     const [blobsResult, countResult] = await Promise.all([
       turso.execute({
-        sql: `SELECT * FROM uploads WHERE wallet = ? ORDER BY created_at DESC LIMIT 20`,
+        sql: `SELECT * FROM uploads WHERE wallet = ? ORDER BY created_at DESC`,
         args: [address],
       }),
       turso.execute({
@@ -159,14 +158,30 @@ app.get("/api/history", async (req: Request, res: Response, next: NextFunction) 
       }),
     ]);
 
-    const blobs = blobsResult.rows.map((r) => ({
-      blobName:  r.blob_name  as string,
-      mimeType:  r.mime_type  as string,
-      sizeBytes: r.size_bytes as number,
-      expiresAt: r.expires_at as string,
-      createdAt: r.created_at as string,
-      isWritten: true,
-    }));
+    // ── Limit 50 per category ─────────────────────────────────────────────
+    const categories: Record<string, number> = {};
+
+    const blobs = blobsResult.rows
+      .map((r) => ({
+        blobName:  r.blob_name  as string,
+        mimeType:  r.mime_type  as string,
+        sizeBytes: r.size_bytes as number,
+        expiresAt: r.expires_at as string,
+        createdAt: r.created_at as string,
+        isWritten: true,
+      }))
+      .filter((b) => {
+        const ext = b.blobName.split(".").pop()?.toLowerCase() ?? "";
+        let cat = "other";
+        if (["jpg","jpeg","png","gif","webp","svg","avif"].includes(ext)) cat = "images";
+        else if (["mp4","mov","avi","mkv","webm"].includes(ext)) cat = "videos";
+        else if (["mp3","wav","aac","ogg","flac"].includes(ext)) cat = "audio";
+        else if (["pdf","doc","docx","txt","xls","xlsx","ppt","pptx"].includes(ext)) cat = "documents";
+        else if (["zip","tar","gz","rar","7z"].includes(ext)) cat = "archives";
+
+        categories[cat] = (categories[cat] || 0) + 1;
+        return categories[cat] <= 50;
+      });
 
     const totalUploads = countResult.rows[0].count as number;
 
@@ -176,6 +191,8 @@ app.get("/api/history", async (req: Request, res: Response, next: NextFunction) 
     next(err);
   }
 });
+
+
 
 // ─── GET /api/preview ────────────────────────────────────────────────────────
 
