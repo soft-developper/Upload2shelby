@@ -257,14 +257,11 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
           </div>
         </div>
       )}
-
-      {/* ── Header ───────────────────────────────────────────────────── */}
-      <div className="history__header">
-        <h2 className="history__title">Upload History</h2>
-        {totalUploads > 20 && (
-          <span className="history__showing">showing last 20</span>
-        )}
-      </div>
+	{/* ── Header ───────────────────────────────────────────────────── */}
+<div className="history__header">
+  <h2 className="history__title">Upload History</h2>
+</div>
+     
 
       {/* ── Share toast ───────────────────────────────────────────────── */}
       {shareLink && (
