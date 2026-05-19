@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import "./UploadHistory.css";
 
 interface Props {
@@ -28,11 +28,11 @@ function formatBytes(bytes: number): string {
 
 function getCategory(blobName: string): FileCategory {
   const ext = blobName.split(".").pop()?.toLowerCase() ?? "";
-  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "avif"].includes(ext)) return "Images";
-  if (["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return "Videos";
-  if (["mp3", "wav", "aac", "ogg", "flac"].includes(ext)) return "Audio";
-  if (["pdf", "doc", "docx", "txt", "xls", "xlsx", "ppt", "pptx"].includes(ext)) return "Documents";
-  if (["zip", "tar", "gz", "rar", "7z"].includes(ext)) return "Archives";
+  if (["jpg","jpeg","png","gif","webp","svg","avif"].includes(ext)) return "Images";
+  if (["mp4","mov","avi","mkv","webm"].includes(ext)) return "Videos";
+  if (["mp3","wav","aac","ogg","flac"].includes(ext)) return "Audio";
+  if (["pdf","doc","docx","txt","xls","xlsx","ppt","pptx"].includes(ext)) return "Documents";
+  if (["zip","tar","gz","rar","7z"].includes(ext)) return "Archives";
   return "Other";
 }
 
@@ -147,6 +147,65 @@ function RenewModal({
   );
 }
 
+function FileItem({
+  item,
+  onDownload,
+  onShare,
+  onRenew,
+}: {
+  item: HistoryItem;
+  onDownload: (item: HistoryItem) => void;
+  onShare: (item: HistoryItem) => void;
+  onRenew: (blobName: string) => void;
+}) {
+  const days = daysUntilExpiry(item.expiresAt);
+  const isExpiringSoon = days >= 0 && days <= 3;
+  const isExpired = days < 0;
+
+  return (
+    <li className="history__item">
+      <HistoryThumb item={item} />
+      <div className="history__item-body">
+        <div className="history__blob-name" title={item.blobName}>
+          {(item.blobName.split("/").pop() ?? "").replace(/^\d+-/, "")}
+        </div>
+        <div className="history__meta">
+          <span>{formatBytes(item.sizeBytes)}</span>
+          <span className="history__sep">·</span>
+          <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+          <span className="history__sep">·</span>
+          <span className={
+            isExpired ? "history__status--error" :
+            isExpiringSoon ? "history__status--warn" :
+            "history__status--done"
+          }>
+            {isExpired ? "Expired" : days === 0 ? "Expires today" : `Exp. in ${days}d`}
+          </span>
+        </div>
+      </div>
+      <div className="history__actions">
+        <button
+          className="history__btn history__btn--share"
+          onClick={() => onShare(item)}
+          title="Copy share link"
+        >🔗</button>
+        <button
+          className="history__btn history__btn--download"
+          onClick={() => onDownload(item)}
+          title="Download"
+        >⬇</button>
+        {!isExpired && (
+          <button
+            className="history__btn history__btn--renew"
+            onClick={() => onRenew(item.blobName)}
+            title="Extend expiry"
+          >↻</button>
+        )}
+      </div>
+    </li>
+  );
+}
+
 export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [totalUploads, setTotalUploads] = useState<number>(0);
@@ -156,6 +215,10 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [renewRefresh, setRenewRefresh] = useState(0);
   const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<HistoryItem[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchHistory = () => {
     if (!walletAddress) return;
@@ -167,8 +230,9 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
         if (data.success) {
           setHistory(data.blobs);
           setTotalUploads(data.totalUploads);
-          // open all categories by default
-          const cats = Array.from(new Set(data.blobs.map((b: HistoryItem) => getCategory(b.blobName))));
+          const cats = Array.from(
+            new Set(data.blobs.map((b: HistoryItem) => getCategory(b.blobName)))
+          );
           const initial: Record<string, boolean> = {};
           cats.forEach((c) => { initial[c as string] = false; });
           setOpenCategories(initial);
@@ -182,14 +246,40 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
 
   useEffect(() => { fetchHistory(); }, [walletAddress, refresh, renewRefresh]);
 
-  // ── Dashboard stats ──────────────────────────────────────────────────────
+  const handleSearch = useCallback((q: string) => {
+    setSearchQuery(q);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    if (q.trim().length === 0) {
+      setSearchResults(null);
+      return;
+    }
+    searchTimeout.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(
+          `${API}/api/search?address=${walletAddress}&q=${encodeURIComponent(q.trim())}`
+        );
+        const data = await res.json();
+        if (data.success) setSearchResults(data.blobs);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+  }, [walletAddress]);
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setSearchResults(null);
+  };
+
   const totalSize = history.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
   const expiringThisWeek = history.filter((f) => {
     const d = daysUntilExpiry(f.expiresAt);
     return d >= 0 && d <= 7;
   }).length;
 
-  // ── Group by category ────────────────────────────────────────────────────
   const grouped = history.reduce<Record<FileCategory, HistoryItem[]>>(
     (acc, item) => {
       const cat = getCategory(item.blobName);
@@ -203,7 +293,6 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
   const categoryOrder: FileCategory[] = ["Images", "Videos", "Audio", "Documents", "Archives", "Other"];
   const activeCategories = categoryOrder.filter((c) => grouped[c]?.length > 0);
 
-  // ── Download ─────────────────────────────────────────────────────────────
   const handleDownload = (item: HistoryItem) => {
     const fileName = (item.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
     const url = `${API}/api/download?blobName=${encodeURIComponent(item.blobName)}`;
@@ -213,7 +302,6 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
     a.click();
   };
 
-  // ── Share ─────────────────────────────────────────────────────────────────
   const handleShare = (item: HistoryItem) => {
     const encoded = encodeURIComponent(item.blobName);
     const link = `${window.location.origin}/share?blob=${encoded}`;
@@ -228,7 +316,6 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
   return (
     <section className="history">
 
-      {/* ── Renew modal ───────────────────────────────────────────────── */}
       {renewTarget && (
         <RenewModal
           blobName={renewTarget}
@@ -238,7 +325,6 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
         />
       )}
 
-      {/* ── Dashboard Stats ───────────────────────────────────────────── */}
       {totalUploads > 0 && (
         <div className="dashboard">
           <div className="dashboard__stat">
@@ -257,13 +343,24 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
           </div>
         </div>
       )}
-	{/* ── Header ───────────────────────────────────────────────────── */}
-<div className="history__header">
-  <h2 className="history__title">Upload History</h2>
-</div>
-     
 
-      {/* ── Share toast ───────────────────────────────────────────────── */}
+      <div className="history__header">
+        <h2 className="history__title">Upload History</h2>
+        <div className="search">
+          <input
+            type="text"
+            className="search__input"
+            placeholder="Search files..."
+            value={searchQuery}
+            onChange={(e) => handleSearch(e.target.value)}
+          />
+          {searchQuery && (
+            <button className="search__clear" onClick={clearSearch}>×</button>
+          )}
+          {searching && <span className="search__spinner">⟳</span>}
+        </div>
+      </div>
+
       {shareLink && (
         <div className="share-toast">
           <span>Link copied to clipboard</span>
@@ -278,8 +375,32 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
         <p className="history__state">No uploads found for this wallet.</p>
       )}
 
-      {/* ── Grouped categories ────────────────────────────────────────── */}
-      {activeCategories.map((cat) => (
+      {searchResults !== null && (
+        <div className="search-results">
+          <div className="search-results__header">
+            <span className="search-results__count">
+              {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for "{searchQuery}"
+            </span>
+          </div>
+          {searchResults.length === 0 ? (
+            <p className="history__state">No files match your search.</p>
+          ) : (
+            <ul className="history__list">
+              {searchResults.map((item, i) => (
+                <FileItem
+                  key={i}
+                  item={item}
+                  onDownload={handleDownload}
+                  onShare={handleShare}
+                  onRenew={setRenewTarget}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {searchResults === null && activeCategories.map((cat) => (
         <div key={cat} className="history__group">
           <button
             className="history__group-header"
@@ -295,56 +416,15 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
 
           {openCategories[cat] && (
             <ul className="history__list">
-              {grouped[cat].map((item, i) => {
-                const days = daysUntilExpiry(item.expiresAt);
-                const isExpiringSoon = days >= 0 && days <= 3;
-                const isExpired = days < 0;
-
-                return (
-                  <li key={i} className="history__item">
-                    <HistoryThumb item={item} />
-
-                    <div className="history__item-body">
-                      <div className="history__blob-name" title={item.blobName}>
-                        {(item.blobName.split("/").pop() ?? "").replace(/^\d+-/, "")}
-                      </div>
-                      <div className="history__meta">
-                        <span>{formatBytes(item.sizeBytes)}</span>
-                        <span className="history__sep">·</span>
-                        <span>{new Date(item.createdAt).toLocaleDateString()}</span>
-                        <span className="history__sep">·</span>
-                        <span className={
-                          isExpired ? "history__status--error" :
-                          isExpiringSoon ? "history__status--warn" :
-                          "history__status--done"
-                        }>
-                          {isExpired ? "Expired" : days === 0 ? "Expires today" : `Exp. in ${days}d`}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="history__actions">
-                      <button
-                        className="history__btn history__btn--share"
-                        onClick={() => handleShare(item)}
-                        title="Copy share link"
-                      >🔗</button>
-                      <button
-                        className="history__btn history__btn--download"
-                        onClick={() => handleDownload(item)}
-                        title="Download file"
-                      >⬇</button>
-                      {!isExpired && (
-                        <button
-                          className="history__btn history__btn--renew"
-                          onClick={() => setRenewTarget(item.blobName)}
-                          title="Extend expiry"
-                        >↻</button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
+              {grouped[cat].map((item, i) => (
+                <FileItem
+                  key={i}
+                  item={item}
+                  onDownload={handleDownload}
+                  onShare={handleShare}
+                  onRenew={setRenewTarget}
+                />
+              ))}
             </ul>
           )}
         </div>

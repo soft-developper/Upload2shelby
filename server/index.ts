@@ -370,6 +370,48 @@ app.get("/api/download", async (req: Request, res: Response, next: NextFunction)
   }
 });
 
+// ─── GET /api/search ─────────────────────────────────────────────────────────
+
+app.get("/api/search", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const address = req.query.address as string;
+    const query = req.query.q as string;
+
+    if (!address) {
+      res.status(400).json({ success: false, error: "address required" });
+      return;
+    }
+
+    if (!query || query.trim().length < 1) {
+      res.status(400).json({ success: false, error: "search query required" });
+      return;
+    }
+
+    const result = await turso.execute({
+      sql: `SELECT * FROM uploads 
+            WHERE wallet = ? 
+            AND blob_name LIKE ? 
+            ORDER BY created_at DESC 
+            LIMIT 100`,
+      args: [address, `%${query.trim()}%`],
+    });
+
+    const blobs = result.rows.map((r) => ({
+      blobName:  r.blob_name  as string,
+      mimeType:  r.mime_type  as string,
+      sizeBytes: r.size_bytes as number,
+      expiresAt: r.expires_at as string,
+      createdAt: r.created_at as string,
+      isWritten: true,
+    }));
+
+    console.log(`[search] "${query}" → ${blobs.length} results for ${address}`);
+    res.json({ success: true, blobs, total: blobs.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 // ─── Global error handler ─────────────────────────────────────────────────────
 
