@@ -53,7 +53,7 @@ function PriceTag({ price }: { price: number }) {
 }
 
 export default function MarketplacePage() {
-  const { connected, account } = useWallet();
+  const { connected, account, signAndSubmitTransaction } = useWallet();
   const [files, setFiles] = useState<MarketplaceFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -127,18 +127,19 @@ export default function MarketplacePage() {
       const amountInMicro = Math.round(file.price * 1_000_000);
 
       const txPayload = {
-        type: "entry_function_payload",
-        function: "0x1::coin::transfer",
-        type_arguments: ["0x1::aptos_coin::AptosCoin"],
-        arguments: [file.wallet, amountInMicro.toString()],
-      };
+  data: {
+    function: "0x1::coin::transfer" as `${string}::${string}::${string}`,
+    typeArguments: ["0x1::aptos_coin::AptosCoin"],
+    functionArguments: [file.wallet, amountInMicro.toString()],
+  },
+};
 
-      const response = await (window as any).aptos?.signAndSubmitTransaction(txPayload);
+const response = await signAndSubmitTransaction(txPayload);
 
-      if (!response?.hash) {
-        showStatus("Transaction failed or was rejected");
-        return;
-      }
+if (!response?.hash) {
+  showStatus("Transaction failed or was rejected");
+  return;
+}
 
       showStatus("Payment sent — verifying on chain...");
       await new Promise((resolve) => setTimeout(resolve, 3000));
