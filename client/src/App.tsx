@@ -117,8 +117,8 @@ export default function App() {
             <span className="logo-text">Shelby<em>Easy</em></span>
           </div>
           <div className="header-nav">
-            <a href="/marketplace" className="btn btn--ghost header-nav__link">Marketplace</a>
-            <a href="/profile" className="btn btn--ghost header-nav__link">API Keys</a>
+            <a href="/marketplace" className="header-nav__link">Marketplace</a>
+            <a href="/profile" className="header-nav__link" target="_blank" rel="noopener noreferrer">API Keys</a>
             <WalletBar />
           </div>
         </div>
