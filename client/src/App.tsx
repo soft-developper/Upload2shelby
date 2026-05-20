@@ -9,8 +9,6 @@ import UploadHistory from "./components/UploadHistory";
 import type { QueuedFile, UploadedFile } from "./types";
 import "./App.css";
 
-//const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
-
 export default function App() {
   const { connected, account, signMessage } = useWallet();
   const [queue, setQueue] = useState<QueuedFile[]>([]);
@@ -42,7 +40,6 @@ export default function App() {
     setSignError(null);
     setIsUploading(true);
 
-    // Step 1: ask wallet to sign a message — proves ownership before upload
     let signature: string;
     let walletAddress: string;
     try {
@@ -53,20 +50,18 @@ export default function App() {
       });
       signature = response.signature.toString();
       walletAddress = account.address.toString();
-    } catch (err) {
+    } catch {
       setSignError("Wallet signature was rejected. Upload cancelled.");
       setIsUploading(false);
       return;
     }
 
-    // Step 2: mark files as uploading
     setQueue((q) =>
       q.map((f) =>
         f.status === "pending" ? { ...f, status: "uploading", progress: 0 } : f
       )
     );
 
-    // Step 3: send files + signature to server
     const formData = new FormData();
     pending.forEach((qf) => formData.append("files", qf.file));
     formData.append("blobPrefix", "uploads");
@@ -105,7 +100,7 @@ export default function App() {
       setIsUploading(false);
       abortRef.current = null;
     }
-  }, [queue, account, signMessage,storageDays]);
+  }, [queue, account, signMessage, storageDays]);
 
   const clearQueue = useCallback(() => {
     setQueue((q) => q.filter((f) => f.status !== "done"));
@@ -119,9 +114,13 @@ export default function App() {
         <div className="header-top">
           <div className="logo">
             <span className="logo-icon">◈</span>
-            <span className="logo-text">EA<em>SY</em></span>
+            <span className="logo-text">Shelby<em>Easy</em></span>
           </div>
-          <WalletBar />
+          <div className="header-nav">
+            <a href="/marketplace" className="btn btn--ghost header-nav__link">Marketplace</a>
+            <a href="/profile" className="btn btn--ghost header-nav__link">API Keys</a>
+            <WalletBar />
+          </div>
         </div>
         <p className="tagline">Decentralized cloud storage — connect wallet, drop files, done.</p>
       </header>
@@ -139,11 +138,12 @@ export default function App() {
         ) : (
           <>
             <DropZone onFiles={enqueue} disabled={isUploading} />
-<DurationSlider
-  days={storageDays}
-  onChange={setStorageDays}
-  disabled={isUploading}
-/>
+
+            <DurationSlider
+              days={storageDays}
+              onChange={setStorageDays}
+              disabled={isUploading}
+            />
 
             {signError && (
               <div className="sign-error">{signError}</div>
@@ -163,7 +163,10 @@ export default function App() {
               <ConfirmationPanel files={confirmed} onDismiss={clearConfirmed} />
             )}
 
-            <UploadHistory walletAddress={account?.address.toString() ?? ""} refresh={historyRefresh} />
+            <UploadHistory
+              walletAddress={account?.address.toString() ?? ""}
+              refresh={historyRefresh}
+            />
           </>
         )}
       </main>

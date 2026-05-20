@@ -428,3 +428,7 @@
   .search__input { width: 140px; }
   .history__header { flex-wrap: wrap; gap: 10px; }
 }
+
+
+.history__btn--toggle { }
+.history__btn--public { border-color: var(--accent); color: var(--accent); }

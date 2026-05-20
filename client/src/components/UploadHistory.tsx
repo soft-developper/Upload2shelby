@@ -13,6 +13,7 @@ interface HistoryItem {
   createdAt: string;
   sizeBytes: number;
   isWritten: boolean;
+  isPublic?: boolean;
 }
 
 type FileCategory = "Images" | "Videos" | "Audio" | "Documents" | "Archives" | "Other";
@@ -147,16 +148,68 @@ function RenewModal({
   );
 }
 
+function PublicToggle({
+  item,
+  walletAddress,
+  onToggle,
+}: {
+  item: HistoryItem;
+  walletAddress: string;
+  onToggle: () => void;
+}) {
+  const [isPublic, setIsPublic] = useState(item.isPublic ?? false);
+  const [loading, setLoading] = useState(false);
+
+  const handleToggle = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/toggle-public`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blobName: item.blobName,
+          walletAddress,
+          isPublic: !isPublic,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsPublic(!isPublic);
+        onToggle();
+      }
+    } catch {
+      alert("Failed to update visibility");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      className={`history__btn ${isPublic ? "history__btn--public" : ""}`}
+      onClick={handleToggle}
+      disabled={loading}
+      title={isPublic ? "Public — click to make private" : "Private — click to make public"}
+    >
+      {loading ? "..." : isPublic ? "🌐" : "🔒"}
+    </button>
+  );
+}
+
 function FileItem({
   item,
+  walletAddress,
   onDownload,
   onShare,
   onRenew,
+  onToggle,
 }: {
   item: HistoryItem;
+  walletAddress: string;
   onDownload: (item: HistoryItem) => void;
   onShare: (item: HistoryItem) => void;
   onRenew: (blobName: string) => void;
+  onToggle: () => void;
 }) {
   const days = daysUntilExpiry(item.expiresAt);
   const isExpiringSoon = days >= 0 && days <= 3;
@@ -184,6 +237,11 @@ function FileItem({
         </div>
       </div>
       <div className="history__actions">
+        <PublicToggle
+          item={item}
+          walletAddress={walletAddress}
+          onToggle={onToggle}
+        />
         <button
           className="history__btn history__btn--share"
           onClick={() => onShare(item)}
@@ -390,9 +448,11 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
                 <FileItem
                   key={i}
                   item={item}
+                  walletAddress={walletAddress}
                   onDownload={handleDownload}
                   onShare={handleShare}
                   onRenew={setRenewTarget}
+                  onToggle={() => setRenewRefresh((r) => r + 1)}
                 />
               ))}
             </ul>
@@ -420,9 +480,11 @@ export default function UploadHistory({ walletAddress, refresh = 0 }: Props) {
                 <FileItem
                   key={i}
                   item={item}
+                  walletAddress={walletAddress}
                   onDownload={handleDownload}
                   onShare={handleShare}
                   onRenew={setRenewTarget}
+                  onToggle={() => setRenewRefresh((r) => r + 1)}
                 />
               ))}
             </ul>
