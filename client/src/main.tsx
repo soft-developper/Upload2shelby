@@ -8,41 +8,40 @@ import MarketplacePage from "./pages/MarketplacePage.tsx";
 import ProfilePage from "./pages/ProfilePage.tsx";
 
 const path = window.location.pathname;
-
 const isSharePage = path === "/share";
 const isMarketplace = path === "/marketplace";
 const isProfile = path === "/profile";
+
+const WalletProvider = ({ children }: { children: React.ReactNode }) => (
+  <AptosWalletAdapterProvider
+    autoConnect={true}
+    dappConfig={{
+      network: Network.TESTNET,
+      aptosApiKeys: import.meta.env.VITE_APTOS_API_KEY || ""
+    }}
+    disableTelemetry={true}
+    onError={(error) => console.error("Wallet error:", error)}
+  >
+    {children}
+  </AptosWalletAdapterProvider>
+);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {isSharePage ? (
       <SharePage />
     ) : isMarketplace ? (
-      <MarketplacePage />
+      <WalletProvider>
+        <MarketplacePage />
+      </WalletProvider>
     ) : isProfile ? (
-      <AptosWalletAdapterProvider
-        autoConnect={true}
-        dappConfig={{
-          network: Network.TESTNET,
-          aptosApiKeys: import.meta.env.VITE_APTOS_API_KEY || ""
-        }}
-        disableTelemetry={true}
-        onError={(error) => console.error("Wallet error:", error)}
-      >
+      <WalletProvider>
         <ProfilePage />
-      </AptosWalletAdapterProvider>
+      </WalletProvider>
     ) : (
-      <AptosWalletAdapterProvider
-        autoConnect={true}
-        dappConfig={{
-          network: Network.TESTNET,
-          aptosApiKeys: import.meta.env.VITE_APTOS_API_KEY || ""
-        }}
-        disableTelemetry={true}
-        onError={(error) => console.error("Wallet error:", error)}
-      >
+      <WalletProvider>
         <App />
-      </AptosWalletAdapterProvider>
+      </WalletProvider>
     )}
   </StrictMode>
 );

@@ -63,6 +63,10 @@ try {
   await turso.execute(`ALTER TABLE uploads ADD COLUMN downloads INTEGER DEFAULT 0`);
 } catch { /* column already exists */ }
 
+try {
+  await turso.execute(`ALTER TABLE uploads ADD COLUMN price REAL DEFAULT 0`);
+} catch { /* column already exists */ }
+
 console.log("✅ Database connected");
 
 
@@ -193,6 +197,7 @@ app.get("/api/history", async (req: Request, res: Response, next: NextFunction) 
     createdAt: r.created_at as string,
     isWritten: true,
     isPublic:  r.is_public === 1 || r.is_public === "1",
+    price:     Number(r.price ?? 0),
   }))
   .filter((b) => {
     const ext = b.blobName.split(".").pop()?.toLowerCase() ?? "";
@@ -436,16 +441,14 @@ app.get("/api/search", async (req: Request, res: Response, next: NextFunction) =
 });
 
 // ─── POST /api/toggle-public ─────────────────────────────────────────────────
-//
-//  Makes a file public or private
-//  Body: { blobName, walletAddress, isPublic }
 
 app.post("/api/toggle-public", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { blobName, walletAddress, isPublic } = req.body as {
+    const { blobName, walletAddress, isPublic, price = 0 } = req.body as {
       blobName: string;
       walletAddress: string;
       isPublic: boolean;
+      price: number;
     };
 
     if (!blobName || !walletAddress) {
@@ -454,21 +457,18 @@ app.post("/api/toggle-public", async (req: Request, res: Response, next: NextFun
     }
 
     await turso.execute({
-      sql: `UPDATE uploads SET is_public = ? WHERE blob_name = ? AND wallet = ?`,
-      args: [isPublic ? 1 : 0, blobName, walletAddress],
+      sql: `UPDATE uploads SET is_public = ?, price = ? WHERE blob_name = ? AND wallet = ?`,
+      args: [isPublic ? 1 : 0, price, blobName, walletAddress],
     });
 
-    console.log(`[marketplace] ${blobName} → ${isPublic ? "public" : "private"}`);
-    res.json({ success: true, isPublic });
+    console.log(`[marketplace] ${blobName} → ${isPublic ? `public at ${price} ShelbyUSD` : "private"}`);
+    res.json({ success: true, isPublic, price });
   } catch (err) {
     next(err);
   }
 });
 
 // ─── GET /api/marketplace ────────────────────────────────────────────────────
-//
-//  Returns all public files across all wallets
-//  Query: ?category=images&q=searchterm
 
 app.get("/api/marketplace", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -510,6 +510,7 @@ app.get("/api/marketplace", async (req: Request, res: Response, next: NextFuncti
       createdAt: r.created_at as string,
       wallet:    r.wallet     as string,
       downloads: r.downloads  as number,
+      price:     Number(r.price ?? 0),
     }));
 
     res.json({ success: true, files, total: files.length });
@@ -517,6 +518,8 @@ app.get("/api/marketplace", async (req: Request, res: Response, next: NextFuncti
     next(err);
   }
 });
+
+
 
 // ─── POST /api/keys/generate ─────────────────────────────────────────────────
 //
@@ -783,6 +786,117 @@ app.post(
     }
   }
 );
+
+// ─── POST /api/purchase ──────────────────────────────────────────────────────
+//
+//  Verifies a ShelbyUSD payment on-chain then returns the download.
+//  Body: { blobName, txHash, buyerAddress }
+
+app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { blobName, txHash, buyerAddress } = req.body as {
+      blobName: string;
+      txHash: string;
+      buyerAddress: string;
+    };
+
+    if (!blobName || !txHash || !buyerAddress) {
+      res.status(400).json({ success: false, error: "blobName, txHash and buyerAddress required" });
+      return;
+    }
+
+    // Fetch file details from DB
+    const fileResult = await turso.execute({
+      sql: `SELECT * FROM uploads WHERE blob_name = ? AND is_public = 1`,
+      args: [blobName],
+    });
+
+    if (fileResult.rows.length === 0) {
+      res.status(404).json({ success: false, error: "File not found or not public" });
+      return;
+    }
+
+    const file = fileResult.rows[0];
+    const price = Number(file.price ?? 0);
+    const ownerWallet = file.wallet as string;
+
+    // If file is free, skip payment verification
+    if (price === 0) {
+      // Increment downloads
+      await turso.execute({
+        sql: `UPDATE uploads SET downloads = downloads + 1 WHERE blob_name = ?`,
+        args: [blobName],
+      });
+      res.json({ success: true, authorized: true });
+      return;
+    }
+
+    // Verify the transaction on Aptos blockchain
+    const aptosApiUrl = `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`;
+    const aptosRes = await fetch(aptosApiUrl, {
+      headers: {
+        "Authorization": `Bearer ${process.env.APTOS_API_KEY || ""}`,
+      },
+    });
+
+    if (!aptosRes.ok) {
+      res.status(400).json({ success: false, error: "Transaction not found on chain" });
+      return;
+    }
+
+    const tx = await aptosRes.json() as {
+      success: boolean;
+      sender: string;
+      events?: { type: string; data: { amount: string; to?: string; recipient?: string } }[];
+      vm_status?: string;
+    };
+
+    // Check transaction succeeded
+    if (!tx.success || tx.vm_status !== "Executed successfully") {
+      res.status(400).json({ success: false, error: "Transaction did not succeed" });
+      return;
+    }
+
+    // Check sender matches buyer
+    if (tx.sender.toLowerCase() !== buyerAddress.toLowerCase()) {
+      res.status(400).json({ success: false, error: "Transaction sender does not match buyer" });
+      return;
+    }
+
+    // Check payment event — look for a transfer to the file owner
+    const transferEvent = tx.events?.find((e) =>
+      (e.type.includes("coin") || e.type.includes("fungible_asset")) &&
+      (e.data.to?.toLowerCase() === ownerWallet.toLowerCase() ||
+       e.data.recipient?.toLowerCase() === ownerWallet.toLowerCase())
+    );
+
+    if (!transferEvent) {
+      res.status(400).json({ success: false, error: "Payment to file owner not found in transaction" });
+      return;
+    }
+
+    // Check amount — ShelbyUSD uses 6 decimal places
+    const paidAmount = Number(transferEvent.data.amount) / 1_000_000;
+    if (paidAmount < price) {
+      res.status(400).json({
+        success: false,
+        error: `Insufficient payment. Expected ${price} ShelbyUSD, got ${paidAmount}`,
+      });
+      return;
+    }
+
+    // Payment verified — increment downloads
+    await turso.execute({
+      sql: `UPDATE uploads SET downloads = downloads + 1 WHERE blob_name = ?`,
+      args: [blobName],
+    });
+
+    console.log(`[purchase] ${buyerAddress} bought ${blobName} for ${price} ShelbyUSD (tx: ${txHash})`);
+    res.json({ success: true, authorized: true });
+  } catch (err) {
+    next(err);
+  }
+});
 
 
 // ─── Global error handler ─────────────────────────────────────────────────────

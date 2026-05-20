@@ -14,6 +14,7 @@ interface HistoryItem {
   sizeBytes: number;
   isWritten: boolean;
   isPublic?: boolean;
+  price?: number;
 }
 
 type FileCategory = "Images" | "Videos" | "Audio" | "Documents" | "Archives" | "Other";
@@ -158,9 +159,11 @@ function PublicToggle({
   onToggle: () => void;
 }) {
   const [isPublic, setIsPublic] = useState(item.isPublic ?? false);
+  const [price, setPrice] = useState(item.price ?? 0);
   const [loading, setLoading] = useState(false);
+  const [showPriceModal, setShowPriceModal] = useState(false);
 
-  const handleToggle = async () => {
+  const handleToggle = async (newPublic: boolean, newPrice: number) => {
     setLoading(true);
     try {
       const res = await fetch(`${API}/api/toggle-public`, {
@@ -169,32 +172,95 @@ function PublicToggle({
         body: JSON.stringify({
           blobName: item.blobName,
           walletAddress,
-          isPublic: !isPublic,
+          isPublic: newPublic,
+          price: newPrice,
         }),
       });
       const data = await res.json();
       if (data.success) {
-        setIsPublic(!isPublic);
+        setIsPublic(newPublic);
+        setPrice(newPrice);
         onToggle();
       }
     } catch {
       alert("Failed to update visibility");
     } finally {
       setLoading(false);
+      setShowPriceModal(false);
     }
   };
 
   return (
-    <button
-      className={`history__btn ${isPublic ? "history__btn--public" : ""}`}
-      onClick={handleToggle}
-      disabled={loading}
-      title={isPublic ? "Public — click to make private" : "Private — click to make public"}
-    >
-      {loading ? "..." : isPublic ? "🌐" : "🔒"}
-    </button>
+    <>
+      <button
+        className={`history__btn ${isPublic ? "history__btn--public" : ""}`}
+        onClick={() => {
+          if (isPublic) {
+            handleToggle(false, 0);
+          } else {
+            setShowPriceModal(true);
+          }
+        }}
+        disabled={loading}
+        title={isPublic ? `Public at ${price} ShelbyUSD — click to make private` : "Private — click to publish"}
+      >
+        {loading ? "..." : isPublic ? "🌐" : "🔒"}
+      </button>
+
+      {showPriceModal && (
+        <div className="modal-overlay" onClick={() => setShowPriceModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal__header">
+              <h3 className="modal__title">Publish to Marketplace</h3>
+              <button className="modal__close" onClick={() => setShowPriceModal(false)}>×</button>
+            </div>
+            <div className="modal__body">
+              <p className="modal__label">Set a price in <strong>ShelbyUSD</strong></p>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "12px 0" }}>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={price}
+                  onChange={(e) => setPrice(Number(e.target.value))}
+                  style={{
+                    flex: 1,
+                    background: "var(--surface-2)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    color: "var(--text)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 14,
+                    padding: "8px 12px",
+                    outline: "none",
+                  }}
+                  placeholder="0"
+                />
+                <span style={{ fontSize: 13, color: "var(--text-muted)", whiteSpace: "nowrap" }}>ShelbyUSD</span>
+              </div>
+              <p className="modal__hint">
+                {price === 0
+                  ? "Free — anyone can download for free"
+                  : `Buyers pay ${price} ShelbyUSD directly to your wallet`}
+              </p>
+            </div>
+            <div className="modal__footer">
+              <button className="btn btn--ghost" onClick={() => setShowPriceModal(false)}>Cancel</button>
+              <button
+                className="btn btn--primary"
+                onClick={() => handleToggle(true, price)}
+                disabled={loading}
+              >
+                {loading ? "Publishing..." : "Publish"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
+
 
 function FileItem({
   item,
