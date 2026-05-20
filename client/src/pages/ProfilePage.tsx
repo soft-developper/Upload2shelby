@@ -13,7 +13,7 @@ interface ApiKey {
 }
 
 export default function ProfilePage() {
-  const { connected, account, connect, wallets } = useWallet();
+  const { connected, account } = useWallet();
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [keyName, setKeyName] = useState("");
   const [generating, setGenerating] = useState(false);
