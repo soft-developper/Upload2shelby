@@ -21,7 +21,7 @@ createRoot(document.getElementById("root")!).render(
       <MarketplacePage />
     ) : isProfile ? (
       <AptosWalletAdapterProvider
-        autoConnect={false}
+        autoConnect={true}
         dappConfig={{
           network: Network.TESTNET,
           aptosApiKeys: import.meta.env.VITE_APTOS_API_KEY || ""
@@ -33,7 +33,7 @@ createRoot(document.getElementById("root")!).render(
       </AptosWalletAdapterProvider>
     ) : (
       <AptosWalletAdapterProvider
-        autoConnect={false}
+        autoConnect={true}
         dappConfig={{
           network: Network.TESTNET,
           aptosApiKeys: import.meta.env.VITE_APTOS_API_KEY || ""
