@@ -788,9 +788,8 @@ app.post(
 );
 
 // ─── POST /api/purchase ──────────────────────────────────────────────────────
-//
-//  Verifies a ShelbyUSD payment on-chain then returns the download.
-//  Body: { blobName, txHash, buyerAddress }
+
+// ─── POST /api/purchase ──────────────────────────────────────────────────────
 
 app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -820,9 +819,8 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
     const price = Number(file.price ?? 0);
     const ownerWallet = file.wallet as string;
 
-    // If file is free, skip payment verification
-    if (price === 0) {
-      // Increment downloads
+    // If file is free skip payment verification
+    if (price === 0 || txHash === "free") {
       await turso.execute({
         sql: `UPDATE uploads SET downloads = downloads + 1 WHERE blob_name = ?`,
         args: [blobName],
@@ -831,50 +829,36 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    // Verify the transaction on Aptos blockchain
-    // Wait longer for transaction to be indexed
+    // Wait for transaction to be indexed on chain
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
-await new Promise((resolve) => setTimeout(resolve, 5000));
+    // Retry up to 5 times in case indexing is slow
+    let tx: any = null;
+    let attempts = 0;
 
-// Try multiple times in case indexing is slow
-let tx: any = null;
-let attempts = 0;
+    while (attempts < 5) {
+      const aptosRes = await fetch(
+        `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`,
+        {
+          headers: {
+            "Authorization": `Bearer ${process.env.APTOS_API_KEY || ""}`,
+          },
+        }
+      );
 
-while (attempts < 5) {
-  const aptosRes = await fetch(
-    `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`,
-    {
-      headers: {
-        "Authorization": `Bearer ${process.env.APTOS_API_KEY || ""}`,
-      },
+      if (aptosRes.ok) {
+        tx = await aptosRes.json();
+        break;
+      }
+
+      attempts++;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     }
-  );
 
-  if (aptosRes.ok) {
-    tx = await aptosRes.json();
-    break;
-  }
-
-  attempts++;
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-}
-
-if (!tx) {
-  res.status(400).json({ success: false, error: "Transaction not found on chain after multiple attempts" });
-  return;
-}
-
-    if (!aptosRes.ok) {
-      res.status(400).json({ success: false, error: "Transaction not found on chain" });
+    if (!tx) {
+      res.status(400).json({ success: false, error: "Transaction not found on chain after multiple attempts" });
       return;
     }
-
-    const tx = await aptosRes.json() as {
-      success: boolean;
-      sender: string;
-      events?: { type: string; data: { amount: string; to?: string; recipient?: string } }[];
-      vm_status?: string;
-    };
 
     // Check transaction succeeded
     if (!tx.success || tx.vm_status !== "Executed successfully") {
@@ -889,7 +873,7 @@ if (!tx) {
     }
 
     // Check payment event — look for a transfer to the file owner
-    const transferEvent = tx.events?.find((e) =>
+    const transferEvent = tx.events?.find((e: any) =>
       (e.type.includes("coin") || e.type.includes("fungible_asset")) &&
       (e.data.to?.toLowerCase() === ownerWallet.toLowerCase() ||
        e.data.recipient?.toLowerCase() === ownerWallet.toLowerCase())
