@@ -141,7 +141,7 @@ export default function MarketplacePage() {
       }
 
       showStatus("Payment sent — verifying on chain...");
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 8000));
 
       const verifyRes = await fetch(`${API}/api/purchase`, {
         method: "POST",
@@ -179,7 +179,8 @@ export default function MarketplacePage() {
     const encoded = encodeURIComponent(file.blobName);
     const link = `${window.location.origin}/share?blob=${encoded}`;
     navigator.clipboard.writeText(link).catch(() => {});
-    showStatus("Share link copied to clipboard");
+   // showStatus("Share link copied to clipboard");
+   showStatus("Payment sent — waiting for confirmation (this takes ~10 seconds)...");
   };
 
   return (

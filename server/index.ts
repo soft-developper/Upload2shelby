@@ -832,12 +832,37 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
     }
 
     // Verify the transaction on Aptos blockchain
-    const aptosApiUrl = `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`;
-    const aptosRes = await fetch(aptosApiUrl, {
+    // Wait longer for transaction to be indexed
+
+await new Promise((resolve) => setTimeout(resolve, 5000));
+
+// Try multiple times in case indexing is slow
+let tx: any = null;
+let attempts = 0;
+
+while (attempts < 5) {
+  const aptosRes = await fetch(
+    `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`,
+    {
       headers: {
         "Authorization": `Bearer ${process.env.APTOS_API_KEY || ""}`,
       },
-    });
+    }
+  );
+
+  if (aptosRes.ok) {
+    tx = await aptosRes.json();
+    break;
+  }
+
+  attempts++;
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+}
+
+if (!tx) {
+  res.status(400).json({ success: false, error: "Transaction not found on chain after multiple attempts" });
+  return;
+}
 
     if (!aptosRes.ok) {
       res.status(400).json({ success: false, error: "Transaction not found on chain" });
