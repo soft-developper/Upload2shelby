@@ -834,13 +834,13 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
     while (attempts < 8 && !verified) {
       try {
         const aptosRes = await fetch(
-          `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`,
-          {
-            headers: {
-              "Authorization": `Bearer ${process.env.APTOS_API_KEY || ""}`,
-            },
-          }
-        );
+  `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`,
+  {
+    headers: {
+      "Authorization": `Bearer ${process.env.APTOS_TESTNET_API_KEY || ""}`,
+    },
+  }
+);
 
         console.log(`[purchase] attempt ${attempts + 1} status: ${aptosRes.status}`);
 
