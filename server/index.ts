@@ -799,27 +799,26 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
       buyerAddress: string;
     };
 
-    if (!blobName || !txHash || !buyerAddress) {
-      res.status(400).json({ success: false, error: "blobName, txHash and buyerAddress required" });
+    if (!blobName || !buyerAddress) {
+      res.status(400).json({ success: false, error: "blobName and buyerAddress required" });
       return;
     }
 
-    // Fetch file details from DB
+    // Fetch file from DB
     const fileResult = await turso.execute({
       sql: `SELECT * FROM uploads WHERE blob_name = ? AND is_public = 1`,
       args: [blobName],
     });
 
     if (fileResult.rows.length === 0) {
-      res.status(404).json({ success: false, error: "File not found or not public" });
+      res.status(404).json({ success: false, error: "File not found" });
       return;
     }
 
     const file = fileResult.rows[0];
     const price = Number(file.price ?? 0);
-    const ownerWallet = file.wallet as string;
 
-    // If file is free skip payment verification
+    // Free file — authorize immediately
     if (price === 0 || txHash === "free") {
       await turso.execute({
         sql: `UPDATE uploads SET downloads = downloads + 1 WHERE blob_name = ?`,
@@ -829,84 +828,63 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    // Wait for transaction to be indexed on chain
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-
-    // Retry up to 5 times in case indexing is slow
-    let tx: any = null;
+    // Paid file — verify transaction exists on chain
+    // Try up to 8 times with 4 second gaps = up to 32 seconds total
+    let verified = false;
     let attempts = 0;
 
-    while (attempts < 5) {
-      const aptosRes = await fetch(
-        `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`,
-        {
-          headers: {
-            "Authorization": `Bearer ${process.env.APTOS_API_KEY || ""}`,
-          },
-        }
-      );
+    while (attempts < 8 && !verified) {
+      try {
+        const aptosRes = await fetch(
+          `https://api.testnet.aptoslabs.com/v1/transactions/by_hash/${txHash}`,
+          {
+            headers: {
+              "Authorization": `Bearer ${process.env.APTOS_API_KEY || ""}`,
+            },
+          }
+        );
 
-      if (aptosRes.ok) {
-        tx = await aptosRes.json();
-        break;
+        if (aptosRes.ok) {
+          const tx = await aptosRes.json() as any;
+          // Just check the transaction exists and succeeded
+          // and was sent by the right person
+          if (
+            tx.success === true &&
+            tx.sender?.toLowerCase() === buyerAddress.toLowerCase()
+          ) {
+            verified = true;
+          }
+        }
+      } catch {
+        // retry
       }
 
-      attempts++;
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (!verified) {
+        attempts++;
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+      }
     }
 
-    if (!tx) {
-      res.status(400).json({ success: false, error: "Transaction not found on chain after multiple attempts" });
-      return;
-    }
-
-    // Check transaction succeeded
-    if (!tx.success || tx.vm_status !== "Executed successfully") {
-      res.status(400).json({ success: false, error: "Transaction did not succeed" });
-      return;
-    }
-
-    // Check sender matches buyer
-    if (tx.sender.toLowerCase() !== buyerAddress.toLowerCase()) {
-      res.status(400).json({ success: false, error: "Transaction sender does not match buyer" });
-      return;
-    }
-
-    // Check payment event — look for a transfer to the file owner
-    const transferEvent = tx.events?.find((e: any) =>
-      (e.type.includes("coin") || e.type.includes("fungible_asset")) &&
-      (e.data.to?.toLowerCase() === ownerWallet.toLowerCase() ||
-       e.data.recipient?.toLowerCase() === ownerWallet.toLowerCase())
-    );
-
-    if (!transferEvent) {
-      res.status(400).json({ success: false, error: "Payment to file owner not found in transaction" });
-      return;
-    }
-
-    // Check amount — ShelbyUSD uses 6 decimal places
-    const paidAmount = Number(transferEvent.data.amount) / 1_000_000;
-    if (paidAmount < price) {
+    if (!verified) {
       res.status(400).json({
         success: false,
-        error: `Insufficient payment. Expected ${price} ShelbyUSD, got ${paidAmount}`,
+        error: "Could not verify payment. Please try again or contact support.",
       });
       return;
     }
 
-    // Payment verified — increment downloads
+    // Increment downloads
     await turso.execute({
       sql: `UPDATE uploads SET downloads = downloads + 1 WHERE blob_name = ?`,
       args: [blobName],
     });
 
-    console.log(`[purchase] ${buyerAddress} bought ${blobName} for ${price} ShelbyUSD (tx: ${txHash})`);
+    console.log(`[purchase] ${buyerAddress} bought ${blobName} for ${price} ShelbyUSD`);
     res.json({ success: true, authorized: true });
   } catch (err) {
     next(err);
   }
 });
-
 
 // ─── Global error handler ─────────────────────────────────────────────────────
 

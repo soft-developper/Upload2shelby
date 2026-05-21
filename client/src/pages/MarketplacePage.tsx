@@ -114,66 +114,80 @@ export default function MarketplacePage() {
   };
 
   // ── Paid purchase ─────────────────────────────────────────────────────────
-  const handlePurchase = async (file: MarketplaceFile) => {
-    if (!connected || !account) {
-      showStatus("Connect your wallet to buy files");
+  
+const handlePurchase = async (file: MarketplaceFile) => {
+  if (!connected || !account) {
+    showStatus("Connect your wallet to buy files");
+    return;
+  }
+
+  setPurchasing(file.blobName);
+
+  try {
+    // Step 1 — send payment from wallet
+    showStatus("Step 1 of 3 — Confirm payment in your wallet...");
+
+    const amountInMicro = Math.round(file.price * 1_000_000);
+
+    const response = await signAndSubmitTransaction({
+      data: {
+        function: "0x1::coin::transfer",
+        typeArguments: ["0x1::aptos_coin::AptosCoin"],
+        functionArguments: [file.wallet, amountInMicro.toString()],
+      },
+    });
+
+    if (!response?.hash) {
+      showStatus("Payment was rejected. No charge made.");
       return;
     }
 
-    setPurchasing(file.blobName);
-    showStatus("Preparing payment — check your wallet...");
+    // Step 2 — verifying on chain
+    showStatus("Step 2 of 3 — Verifying payment on chain (up to 30 seconds)...");
 
-    try {
-      const amountInMicro = Math.round(file.price * 1_000_000);
+    const verifyRes = await fetch(`${API}/api/purchase`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        blobName: file.blobName,
+        txHash: response.hash,
+        buyerAddress: account.address.toString(),
+      }),
+    });
 
-      const response = await signAndSubmitTransaction({
-        data: {
-          function: "0x1::coin::transfer",
-          typeArguments: ["0x1::aptos_coin::AptosCoin"],
-          functionArguments: [file.wallet, amountInMicro.toString()],
-        },
-      });
+    const verifyData = await verifyRes.json();
 
-      if (!response?.hash) {
-        showStatus("Transaction failed or was rejected");
-        setPurchasing(null);
-        return;
-      }
-
-      showStatus("Payment sent — verifying on chain...");
-      await new Promise((resolve) => setTimeout(resolve, 8000));
-
-      const verifyRes = await fetch(`${API}/api/purchase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          blobName: file.blobName,
-          txHash: response.hash,
-          buyerAddress: account.address.toString(),
-        }),
-      });
-
-      const verifyData = await verifyRes.json();
-
-      if (verifyData.authorized) {
-        setPurchased((prev) => new Set(prev).add(file.blobName));
-        showStatus("Payment verified ✓ — downloading now...");
-        const fileName = (file.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
-        const url = `${API}/api/download?blobName=${encodeURIComponent(file.blobName)}`;
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        a.click();
-      } else {
-        showStatus("Payment verification failed: " + verifyData.error);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Purchase failed";
-      showStatus("Error: " + message);
-    } finally {
-      setPurchasing(null);
+    if (!verifyData.authorized) {
+      showStatus("Payment verification failed: " + (verifyData.error ?? "unknown error"));
+      return;
     }
-  };
+
+    // Step 3 — download
+    showStatus("Step 3 of 3 — Payment verified ✓ Starting download...");
+    setPurchased((prev) => new Set(prev).add(file.blobName));
+
+    const fileName = (file.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
+    const url = `${API}/api/download?blobName=${encodeURIComponent(file.blobName)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    setTimeout(() => showStatus("Download complete ✓"), 2000);
+
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Purchase failed";
+    if (message.includes("rejected") || message.includes("cancel")) {
+      showStatus("Payment cancelled. No charge made.");
+    } else {
+      showStatus("Error: " + message);
+    }
+  } finally {
+    setPurchasing(null);
+  }
+};
 
   const handleShare = (file: MarketplaceFile) => {
     const encoded = encodeURIComponent(file.blobName);
