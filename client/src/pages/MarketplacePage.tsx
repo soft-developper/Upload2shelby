@@ -126,20 +126,19 @@ export default function MarketplacePage() {
     try {
       const amountInMicro = Math.round(file.price * 1_000_000);
 
-      const txPayload = {
-  data: {
-    function: "0x1::coin::transfer" as `${string}::${string}::${string}`,
-    typeArguments: ["0x1::aptos_coin::AptosCoin"],
-    functionArguments: [file.wallet, amountInMicro.toString()],
-  },
-};
+      const response = await signAndSubmitTransaction({
+        data: {
+          function: "0x1::coin::transfer",
+          typeArguments: ["0x1::aptos_coin::AptosCoin"],
+          functionArguments: [file.wallet, amountInMicro.toString()],
+        },
+      });
 
-const response = await signAndSubmitTransaction(txPayload);
-
-if (!response?.hash) {
-  showStatus("Transaction failed or was rejected");
-  return;
-}
+      if (!response?.hash) {
+        showStatus("Transaction failed or was rejected");
+        setPurchasing(null);
+        return;
+      }
 
       showStatus("Payment sent — verifying on chain...");
       await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -302,11 +301,11 @@ if (!response?.hash) {
                       <button
                         className="btn btn--primary mkt-card__btn"
                         onClick={() => {
-                          const fileName = (file.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
+                          const fn = (file.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
                           const url = `${API}/api/download?blobName=${encodeURIComponent(file.blobName)}`;
                           const a = document.createElement("a");
                           a.href = url;
-                          a.download = fileName;
+                          a.download = fn;
                           a.click();
                         }}
                       >
