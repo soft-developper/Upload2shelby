@@ -53,6 +53,20 @@ function PriceTag({ price }: { price: number }) {
   );
 }
 
+async function downloadFile(blobName: string, apiUrl: string) {
+  const fileName = (blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
+  const response = await fetch(`${apiUrl}/api/download?blobName=${encodeURIComponent(blobName)}`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function MarketplacePage() {
   const { connected, account, signAndSubmitTransaction } = useWallet();
   const [files, setFiles] = useState<MarketplaceFile[]>([]);
@@ -106,14 +120,9 @@ export default function MarketplacePage() {
       });
       const data = await res.json();
       if (data.authorized) {
-        const fileName = (file.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
-        const url = `${API}/api/download?blobName=${encodeURIComponent(file.blobName)}`;
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        showStatus("Starting download...");
+        await downloadFile(file.blobName, API);
+        showStatus("Download complete ✓");
       }
     } catch {
       showStatus("Download failed — please try again");
@@ -134,8 +143,6 @@ export default function MarketplacePage() {
       showStatus("Step 1 of 3 — Confirm payment in your wallet...");
 
       const amountInMicro = Math.round(file.price * 1_000_000);
-
-      // Payment goes to the server signer address since it owns the blobs on-chain
       const recipient = SIGNER_ADDRESS || file.wallet;
 
       const response = await signAndSubmitTransaction({
@@ -174,17 +181,8 @@ export default function MarketplacePage() {
       // Step 3 — download
       showStatus("Step 3 of 3 — Payment confirmed ✓ Starting download...");
       setPurchased((prev) => new Set(prev).add(file.blobName));
-
-      const fileName = (file.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
-      const url = `${API}/api/download?blobName=${encodeURIComponent(file.blobName)}`;
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      setTimeout(() => showStatus("Download complete ✓"), 2000);
+      await downloadFile(file.blobName, API);
+      setTimeout(() => showStatus("Download complete ✓"), 1000);
 
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Purchase failed";
@@ -323,16 +321,7 @@ export default function MarketplacePage() {
                     ) : alreadyOwned ? (
                       <button
                         className="btn btn--primary mkt-card__btn"
-                        onClick={() => {
-                          const fn = (file.blobName.split("/").pop() ?? "file").replace(/^\d+-/, "");
-                          const url = `${API}/api/download?blobName=${encodeURIComponent(file.blobName)}`;
-                          const a = document.createElement("a");
-                          a.href = url;
-                          a.download = fn;
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                        }}
+                        onClick={() => downloadFile(file.blobName, API)}
                       >
                         ⬇ Download
                       </button>
