@@ -789,8 +789,6 @@ app.post(
 
 // ─── POST /api/purchase ──────────────────────────────────────────────────────
 
-// ─── POST /api/purchase ──────────────────────────────────────────────────────
-
 app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { blobName, txHash, buyerAddress } = req.body as {
@@ -828,7 +826,7 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    // Paid file — verify transaction exists on chain
+    // Paid file — verify transaction on chain
     // Try up to 8 times with 4 second gaps = up to 32 seconds total
     let verified = false;
     let attempts = 0;
@@ -844,19 +842,24 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
           }
         );
 
+        console.log(`[purchase] attempt ${attempts + 1} status: ${aptosRes.status}`);
+
         if (aptosRes.ok) {
           const tx = await aptosRes.json() as any;
-          // Just check the transaction exists and succeeded
-          // and was sent by the right person
+          console.log(`[purchase] tx success: ${tx.success}, sender: ${tx.sender}, vm_status: ${tx.vm_status}`);
+
           if (
             tx.success === true &&
             tx.sender?.toLowerCase() === buyerAddress.toLowerCase()
           ) {
             verified = true;
           }
+        } else {
+          const errText = await aptosRes.text();
+          console.log(`[purchase] api error: ${errText}`);
         }
-      } catch {
-        // retry
+      } catch (e: any) {
+        console.log(`[purchase] fetch error: ${e.message}`);
       }
 
       if (!verified) {
@@ -885,6 +888,7 @@ app.post("/api/purchase", async (req: Request, res: Response, next: NextFunction
     next(err);
   }
 });
+
 
 // ─── Global error handler ─────────────────────────────────────────────────────
 
